@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@dava96/osrs-wiki-bucket-builder": "^1.0.12"
+  }
+}

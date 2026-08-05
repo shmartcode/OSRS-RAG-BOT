@@ -1,0 +1,9 @@
+faiss-cpu
+mwparserfromhell
+numpy
+osrsreboxed
+pytorch_lightning
+Requests
+sentence_transformers
+torch
+transformers

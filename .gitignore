@@ -1,0 +1,17 @@
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Node dependencies
+node_modules/
+
+# Ignore wiki data download
+data/raw/
+data/processed/
+
+# Logs and training outputs
+lightning_logs/
+checkpoints/
+runs/

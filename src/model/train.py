@@ -3,6 +3,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from lightning_dataset import OSRSDataModule  # Adjust to match your dataset module name
 from lightning_model import OSRSRetrieverModel  # Adjust to match your model class name
 from pytorch_lightning.callbacks import Callback
+from transformers import AutoTokenizer
 
 
 def main():
@@ -37,7 +38,8 @@ def main():
     trainer.fit(model, datamodule=datamodule)
     # Automatically save the final Hugging Face model folder too!
     model.model.save_pretrained("./fine_tuned_osrs_embedder")
-    model.tokenizer.save_pretrained("./fine_tuned_osrs_embedder")
+    final_tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
+    final_tokenizer.save_pretrained("./fine_tuned_osrs_embedder")
     print("Training complete and model successfully saved!")
 
 
@@ -49,7 +51,10 @@ class SaveEveryEpochModel(Callback):
 
         print(f"\nSaving model weights for Epoch {epoch_num}...")
         pl_module.model.save_pretrained(save_path)
-        pl_module.tokenizer.save_pretrained(save_path)
+        # Load and save the tokenizer explicitly
+        tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/all-mpnet-base-v2")
+        tokenizer.save_pretrained(save_path)
+
         print(f"Epoch {epoch_num} saved to {save_path}!")
 
 

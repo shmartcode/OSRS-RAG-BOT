@@ -1,6 +1,7 @@
 # Python cache & virtual environments
 __pycache__/
 *.py[cod]
+*.pyc
 venv/
 .venv/
 
@@ -15,3 +16,7 @@ data/processed/
 lightning_logs/
 checkpoints/
 runs/
+*.ckpt
+*.pt
+*.pth
+*.pth.tar

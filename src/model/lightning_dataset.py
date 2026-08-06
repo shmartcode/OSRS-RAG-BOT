@@ -35,7 +35,9 @@ class OSRSDataModule(pl.LightningDataModule):
     and batching for the contrastive retriever model.
     """
 
-    def __init__(self, model_name="sentence-transformers/all-mpnet-base-v2", batch_size=16, max_length=256):
+    def __init__(self, model_name="sentence-transformers/all-mpnet-base-v2", batch_size=8, max_length=384):
+        # 2060 Super: batch size 8. length 384. num workers 4-6
+        # 4050L: batch size 4. length 256.  num workers 6-8
         super().__init__()
         self.model_name = model_name
         self.batch_size = batch_size
@@ -71,5 +73,6 @@ class OSRSDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,  # Shuffle data every epoch to ensure better model generalization
             collate_fn=self.collate_fn,
-            num_workers=2,  # Number of subprocesses for data loading (adjust based on your CPU cores)
+            # workers for 2060: 4-6. for  4050 6-8
+            num_workers=6,  # Number of subprocesses for data loading (adjust based on your CPU cores)
         )

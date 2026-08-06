@@ -18,6 +18,7 @@ class OSRSDataFetcher:
         apcontinue = None
 
         print("Crawling OSRS Wiki page index...")
+        past_length = 0
 
         while True:
             params = {
@@ -39,7 +40,10 @@ class OSRSDataFetcher:
             for page in pages:
                 all_pages.append({"pageid": page["pageid"], "title": page["title"]})
 
-            print(f"Fetched {len(all_pages)} titles so far...")
+            curr_length = len(all_pages)
+            if curr_length > past_length + 10000:
+                past_length += 10000
+                print(f"Fetched {past_length} titles so far...")
 
             # Check if there is another batch
             if "continue" in data and "apcontinue" in data["continue"]:
@@ -136,4 +140,5 @@ class OSRSDataFetcher:
 if __name__ == "__main__":
 
     fetcher = OSRSDataFetcher()
+    fetcher.fetch_all_wiki_pages()
     fetcher.fetch_page_contents_compressed()

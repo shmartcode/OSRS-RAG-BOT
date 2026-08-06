@@ -8,7 +8,7 @@ from transformers import AutoTokenizer
 
 def main():
     # Initialize your Data Module
-    datamodule = OSRSDataModule(batch_size=4, max_length=384)
+    datamodule = OSRSDataModule(batch_size=8, max_length=256)
 
     # Initialize the Lightning Model
     model = OSRSRetrieverModel(learning_rate=2e-5)

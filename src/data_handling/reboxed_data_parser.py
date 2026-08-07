@@ -1,25 +1,44 @@
-# github url for item/weapon properties "https://github.com/0xNeffarion/osrsreboxed-db"
-## Item properties i care about: id, name, members, tradeable, stackable, stacked,
-#                               notable, noted, cost, lowalch, highalch, weight, quest_item, examine,
-# and two dictionaries: equipment, weapon. each containing the bonuses when equipment said equipment/weapon
-
 import json
-from osrsreboxed import items_api, monsters_api, prayers_api
 from pathlib import Path
+from osrsreboxed import items_api, monsters_api, prayers_api
 
 DATA_DIR = Path("data")
 OUTPUT_DIR = DATA_DIR / "processed"
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def flatten_to_text(data):
+    """Recursively converts nested dicts/lists into readable key-value pairs."""
+    parts = []
+
+    if isinstance(data, dict):
+        for key, value in data.items():
+            # Exclude non-semantic metadata keys and recursive 'text' field
+            if key in ["id", "icon", "wiki_url", "text", "category"]:
+                continue
+            sub_text = flatten_to_text(value)
+            if sub_text:
+                parts.append(f"{key.replace('_', ' ')}: {sub_text}")
+
+    elif isinstance(data, list):
+        for item in data:
+            sub_text = flatten_to_text(item)
+            if sub_text:
+                parts.append(sub_text)
+
+    else:
+        if data is not None and str(data).strip():
+            parts.append(str(data))
+
+    return ", ".join(parts)
 
 
 def parse_osrs_items(output_filepath=OUTPUT_DIR / "items_corpus.jsonl"):
-    """Loads items from osrsreboxed, extracts key stats/metadata, and writes them out to a JSONL file."""
     print("Loading items database...")
     items = items_api.load()
-
     count = 0
     with open(output_filepath, "w", encoding="utf-8") as f:
         for item in items:
-            # Build a flat, structured dictionary for the item
             item_record = {
                 "id": item.id,
                 "name": item.name,
@@ -33,10 +52,8 @@ def parse_osrs_items(output_filepath=OUTPUT_DIR / "items_corpus.jsonl"):
                 "weight": getattr(item, "weight", 0),
                 "quest_item": getattr(item, "quest_item", False),
                 "equipment_stats": {},
-                # "weapon_stats": {},
-                "weapon_stats": item.weapon.__dict__.copy() if hasattr(item, "weapon") and item.weapon else {},
+                "weapon_stats": (item.weapon.__dict__.copy() if hasattr(item, "weapon") and item.weapon else {}),
                 "requirement_stats": {},
-                "text": "",
             }
             eq = getattr(item, "equipment", None)
             if eq:
@@ -44,31 +61,26 @@ def parse_osrs_items(output_filepath=OUTPUT_DIR / "items_corpus.jsonl"):
                 item_record["requirement_stats"] = eq_dict.pop("requirements", {}) or {}
                 item_record["equipment_stats"] = eq_dict
 
-            item_record["text"] = flatten_to_text(item_record)
-            # Write out as a single line JSON object
+            # Flatten ALL item attributes (including equipment_stats, weapon_stats, requirement_stats)
+            body = flatten_to_text(item_record)
+
+            # Explicit Entity Lead + Full Stats Text
+            item_record["text"] = f"Item: {item.name}. {body}"
+
             f.write(json.dumps(item_record) + "\n")
             count += 1
-
-    print(f"Successfully processed and saved {count} items to {output_filepath}")
+    print(f"Successfully saved {count} items.")
 
 
 def parse_osrs_monsters(output_filepath=OUTPUT_DIR / "monsters_corpus.jsonl"):
-    """Loads monsters from osrsreboxed, extracts combat attributes, and writes them out to a JSONL file."""
     print("Loading monsters database...")
     monsters = monsters_api.load()
-
     count = 0
     with open(output_filepath, "w", encoding="utf-8") as f:
         for monster in monsters:
-
             raw_drops = getattr(monster, "drops", []) or []
-            formatted_drops = []
-            for drop in raw_drops:
-                # If drops are objects, convert them; if they're already dicts, this handles both safely
-                if hasattr(drop, "__dict__"):
-                    formatted_drops.append(drop.__dict__)
-                else:
-                    formatted_drops.append(drop)
+            formatted_drops = [d.__dict__ if hasattr(d, "__dict__") else d for d in raw_drops]
+
             monster_record = {
                 "id": monster.id,
                 "name": monster.name,
@@ -103,27 +115,25 @@ def parse_osrs_monsters(output_filepath=OUTPUT_DIR / "monsters_corpus.jsonl"):
                 "defence_magic": getattr(monster, "defence_magic", 0),
                 "defence_ranged": getattr(monster, "defence_ranged", 0),
                 "drops": formatted_drops,
-                # Construct natural language summary for text-based model indexing
-                # "text": (f"Monster: {monster.name}. Examine: {getattr(monster, 'examine', 'N/A')}."),
-                "text": "",
             }
 
-            monster_record["text"] = flatten_to_text(monster_record)
+            # Flatten ALL monster attributes (combat stats, bonuses, levels, drops)
+            body = flatten_to_text(monster_record)
+
+            # Explicit Entity Lead + Full Monster Text
+            monster_record["text"] = f"Monster: {monster.name}. {body}"
+
             f.write(json.dumps(monster_record) + "\n")
             count += 1
-
-    print(f"Successfully processed and saved {count} monsters to" f" {output_filepath}")
+    print(f"Successfully saved {count} monsters.")
 
 
 def parse_osrs_prayers(output_filepath=OUTPUT_DIR / "prayers_corpus.jsonl"):
-    """Loads prayers from osrsreboxed, extracts drain rates and stat bonuses, and writes them out to a JSONL file."""
     print("Loading prayers database...")
     prayers = prayers_api.load()
-
     count = 0
     with open(output_filepath, "w", encoding="utf-8") as f:
         for prayer in prayers:
-            # Build a flat, structured dictionary for the prayer
             prayer_record = {
                 "id": getattr(prayer, "id", None),
                 "name": prayer.name,
@@ -133,57 +143,14 @@ def parse_osrs_prayers(output_filepath=OUTPUT_DIR / "prayers_corpus.jsonl"):
                 "drain_per_minute": getattr(prayer, "drain_per_minute", 0),
                 "requirements": getattr(prayer, "requirements", {}),
                 "bonuses": getattr(prayer, "bonuses", {}),
-                "icon": getattr(prayer, "icon", None),
-                # "book": getattr(prayer, "book", "standard"),
-                # Construct a natural language summary string for vector embeddings
-                # "text": (f"Prayer: {prayer.name}. Description: {getattr(prayer, "description", None)}"),
-                "text": "",
             }
 
-            # If the prayer has specific stat modifier bonuses, capture them
-            # if hasattr(prayer, "bonuses") and prayer.bonuses:
-            #     bonuses = prayer.bonuses
-            #     prayer_record["bonuses"] = {
-            #         "attack": getattr(bonuses, "attack", 0),
-            #         "strength": getattr(bonuses, "strength", 0),
-            #         "defence": getattr(bonuses, "defence", 0),
-            #         "ranged": getattr(bonuses, "ranged", 0),
-            #         "magic": getattr(bonuses, "magic", 0),
-            #     }
+            body = flatten_to_text(prayer_record)
+            prayer_record["text"] = f"Prayer: {prayer.name}. {body}"
 
-            prayer_record["text"] = flatten_to_text(prayer_record)
             f.write(json.dumps(prayer_record) + "\n")
             count += 1
-
-    print(f"Successfully processed and saved {count} prayers to {output_filepath}")
-
-
-def flatten_to_text(data):
-    """Recursively converts nested dicts, lists, and primitives into a clean text string."""
-    parts = []
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            # Skip internal or unhelpful keys if needed (e.g., raw IDs or URLs)
-            if key in ["id", "icon", "wiki_url", "text"]:
-                continue
-            # Format key-value pairs nicely
-            sub_text = flatten_to_text(value)
-            if sub_text:
-                parts.append(f"{key.replace('_', ' ')}: {sub_text}")
-
-    elif isinstance(data, list):
-        for item in data:
-            sub_text = flatten_to_text(item)
-            if sub_text:
-                parts.append(sub_text)
-
-    else:
-        # Primitive values (strings, numbers, booleans)
-        if data is not None and str(data).strip():
-            parts.append(str(data))
-
-    return ", ".join(parts)
+    print(f"Successfully saved {count} prayers.")
 
 
 if __name__ == "__main__":

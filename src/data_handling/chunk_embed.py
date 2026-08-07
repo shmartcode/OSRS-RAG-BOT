@@ -6,15 +6,15 @@ import torch
 
 
 def process_embedding():
-    # --- ADD THESE TWO LINES HERE ---
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using compute device: {device}", flush=True)
     # --------------------------------
 
     # Pass the detected device into the model loader
-    model_name = "sentence-transformers/all-mpnet-base-v2"
+    # model_name = "sentence-transformers/all-mpnet-base-v2"
+    model_name = "./fine_tuned_osrs_embedder_epoch2"
     model = SentenceTransformer(model_name, device=device)
-    # print(f"Loading embedding model: {model_name}...")
+    print(f"Loading embedding model: {model_name}...")
 
     # List of your corpus files
     corpus_files = [
@@ -86,12 +86,7 @@ def process_embedding():
 
         if documents:
             print(f"Generating embeddings for {len(documents)} records in {file_name}...")
-            embeddings = model.encode(
-                documents,
-                batch_size=32,
-                show_progress_bar=True,
-                convert_to_numpy=True,
-            )
+            embeddings = model.encode(documents, batch_size=32, show_progress_bar=True, convert_to_numpy=True, normalize_embeddings=True)
             print(f"Finished {file_name}. Embedding shape: {embeddings.shape}")
 
             # Save embeddings and metadata to your processed data folder

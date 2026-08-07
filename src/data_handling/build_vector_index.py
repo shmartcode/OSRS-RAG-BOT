@@ -11,7 +11,7 @@ def build_faiss_index():
     print("Loading embedding files...")
 
     # Find all embedding files saved previously
-    embedding_files = [f for f in os.listdir(PROCESSED_DIR) if f.endswith("_embeddings.npy")]
+    embedding_files = sorted([f for f in os.listdir(PROCESSED_DIR) if f.endswith("_embeddings.npy")])
 
     if not embedding_files:
         print("No embedding files found in data/processed!")

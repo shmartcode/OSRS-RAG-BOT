@@ -74,5 +74,5 @@ class OSRSDataModule(pl.LightningDataModule):
             shuffle=True,  # Shuffle data every epoch to ensure better model generalization
             collate_fn=self.collate_fn,
             # workers for 2060: 4-6. for  4050 6-8
-            num_workers=6,  # Number of subprocesses for data loading (adjust based on your CPU cores)
+            num_workers=0,  # Number of subprocesses for data loading (adjust based on your CPU cores)
         )

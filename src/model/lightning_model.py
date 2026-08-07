@@ -1,45 +1,41 @@
 import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
-from transformers import AutoModel
+from transformers import AutoModel, get_linear_schedule_with_warmup
 
 
 class OSRSRetrieverModel(pl.LightningModule):
     """
-    PyTorch Lightning Module for fine-tuning the sentence embedding model
-    using triplet loss (Query, Positive, Negative).
+    PyTorch Lightning Module for fine-tuning sentence embeddings
+    using In-Batch Negatives with Cross-Entropy Loss.
     """
 
-    def __init__(self, model_name="sentence-transformers/all-mpnet-base-v2", learning_rate=2e-5):
+    def __init__(
+        self,
+        model_name="sentence-transformers/all-mpnet-base-v2",
+        learning_rate=2e-5,
+        temperature=0.05,
+    ):
         super().__init__()
         self.learning_rate = learning_rate
+        self.temperature = temperature
         self.save_hyperparameters()
 
-        # Load the pre-trained transformer backbone
         self.model = AutoModel.from_pretrained(model_name)
-        self.model.train()
 
     def mean_pooling(self, model_output, attention_mask):
-        """
-        Averages token embeddings across the attention mask to create
-        a single fixed-size sentence/passage vector.
-        """
-        token_embeddings = model_output[0]  # First element contains hidden states
+        token_embeddings = model_output[0]
         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).to(token_embeddings.dtype)
         sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
         return sum_embeddings / sum_mask
 
     def forward(self, input_ids, attention_mask):
-        # Pass inputs through the transformer backbone
         outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
-        # Apply mean pooling to get dense vector embeddings
         embeddings = self.mean_pooling(outputs, attention_mask)
-        # Normalize embeddings to unit length for clean cosine similarity computation
         return F.normalize(embeddings, p=2, dim=1)
 
-    def training_step(self, batch, batch_idx):
-        # 1. Forward pass for Queries, Positive matches, and Negative matches
+    def compute_loss(self, batch):
         q_enc = batch["query"]
         pos_enc = batch["positive"]
         neg_enc = batch["negative"]
@@ -48,22 +44,66 @@ class OSRSRetrieverModel(pl.LightningModule):
         pos_vecs = self(pos_enc["input_ids"], pos_enc["attention_mask"])
         neg_vecs = self(neg_enc["input_ids"], neg_enc["attention_mask"])
 
-        # 2. Calculate Cosine Similarities
-        # Distance/similarity between query and the correct (positive) passage
-        pos_score = F.cosine_similarity(q_vecs, pos_vecs)
-        # Distance/similarity between query and the incorrect (negative) passage
-        neg_score = F.cosine_similarity(q_vecs, neg_vecs)
+        # In-Batch Negatives candidates (2B, D)
+        candidates = torch.cat([pos_vecs, neg_vecs], dim=0)
 
-        # 3. Triplet Margin Loss Optimization
-        # We want pos_score to be significantly higher than neg_score (margin = 0.5)
-        margin = 0.5
-        loss = F.relu(neg_score - pos_score + margin).mean()
+        # Cosine similarity matrix (B, 2B)
+        scores = torch.matmul(q_vecs, candidates.T) / self.temperature
 
-        # Log training loss for monitoring progress
-        self.log("train_loss", loss, prog_bar=True, logger=True, on_step=True, on_epoch=True)
+        labels = torch.arange(q_vecs.size(0), device=q_vecs.device)
+        return F.cross_entropy(scores, labels)
+
+    def training_step(self, batch, batch_idx):
+        loss = self.compute_loss(batch)
+        self.log(
+            "train_loss",
+            loss,
+            prog_bar=True,
+            logger=True,
+            on_step=True,
+            on_epoch=True,
+        )
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        loss = self.compute_loss(batch)
+        # Log validation loss per epoch
+        self.log(
+            "val_loss",
+            loss,
+            prog_bar=True,
+            logger=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+        )
         return loss
 
     def configure_optimizers(self):
-        # Standard AdamW optimizer configured with the learning rate
-        optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate)
-        return optimizer
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=0.01)
+
+        try:
+            total_steps = self.trainer.estimated_stepping_batches
+            if total_steps == float("inf"):
+                total_steps = len(self.trainer.train_dataloader) * self.trainer.max_epochs
+        except Exception:
+            # Fallback if stepping_batches isn't available yet
+            total_steps = 1000
+
+        total_steps = int(total_steps)
+        warmup_steps = int(total_steps * 0.1)
+
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer,
+            num_warmup_steps=warmup_steps,
+            num_training_steps=total_steps,
+        )
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+                "frequency": 1,
+            },
+        }

@@ -7,32 +7,6 @@ OUTPUT_DIR = DATA_DIR / "processed"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def flatten_to_text(data):
-    """Recursively converts nested dicts/lists into readable key-value pairs."""
-    parts = []
-
-    if isinstance(data, dict):
-        for key, value in data.items():
-            # Exclude non-semantic metadata keys and recursive 'text' field
-            if key in ["id", "icon", "wiki_url", "text", "category"]:
-                continue
-            sub_text = flatten_to_text(value)
-            if sub_text:
-                parts.append(f"{key.replace('_', ' ')}: {sub_text}")
-
-    elif isinstance(data, list):
-        for item in data:
-            sub_text = flatten_to_text(item)
-            if sub_text:
-                parts.append(sub_text)
-
-    else:
-        if data is not None and str(data).strip():
-            parts.append(str(data))
-
-    return ", ".join(parts)
-
-
 def parse_osrs_items(output_filepath=OUTPUT_DIR / "items_corpus.jsonl"):
     print("Loading items database...")
     items = items_api.load()
@@ -61,11 +35,11 @@ def parse_osrs_items(output_filepath=OUTPUT_DIR / "items_corpus.jsonl"):
                 item_record["requirement_stats"] = eq_dict.pop("requirements", {}) or {}
                 item_record["equipment_stats"] = eq_dict
 
-            # Flatten ALL item attributes (including equipment_stats, weapon_stats, requirement_stats)
-            body = flatten_to_text(item_record)
+            # # Flatten ALL item attributes (including equipment_stats, weapon_stats, requirement_stats)
+            # body = flatten_to_text(item_record)
 
-            # Explicit Entity Lead + Full Stats Text
-            item_record["text"] = f"Item: {item.name}. {body}"
+            # # Explicit Entity Lead + Full Stats Text
+            # item_record["text"] = f"Item: {item.name}. {body}"
 
             f.write(json.dumps(item_record) + "\n")
             count += 1
@@ -117,11 +91,11 @@ def parse_osrs_monsters(output_filepath=OUTPUT_DIR / "monsters_corpus.jsonl"):
                 "drops": formatted_drops,
             }
 
-            # Flatten ALL monster attributes (combat stats, bonuses, levels, drops)
-            body = flatten_to_text(monster_record)
+            # # Flatten ALL monster attributes (combat stats, bonuses, levels, drops)
+            # body = flatten_to_text(monster_record)
 
-            # Explicit Entity Lead + Full Monster Text
-            monster_record["text"] = f"Monster: {monster.name}. {body}"
+            # # Explicit Entity Lead + Full Monster Text
+            # monster_record["text"] = f"Monster: {monster.name}. {body}"
 
             f.write(json.dumps(monster_record) + "\n")
             count += 1
@@ -145,8 +119,8 @@ def parse_osrs_prayers(output_filepath=OUTPUT_DIR / "prayers_corpus.jsonl"):
                 "bonuses": getattr(prayer, "bonuses", {}),
             }
 
-            body = flatten_to_text(prayer_record)
-            prayer_record["text"] = f"Prayer: {prayer.name}. {body}"
+            # body = flatten_to_text(prayer_record)
+            # prayer_record["text"] = f"Prayer: {prayer.name}. {body}"
 
             f.write(json.dumps(prayer_record) + "\n")
             count += 1

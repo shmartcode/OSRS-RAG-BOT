@@ -28,7 +28,7 @@ def main():
     early_stop_callback = EarlyStopping(monitor="val_loss", patience=2, mode="min", verbose=True)
 
     trainer = pl.Trainer(
-        max_epochs=4,
+        max_epochs=6,
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
         precision="16-mixed",  # <--- Uses Tensor Cores for 2x speedup
@@ -36,7 +36,7 @@ def main():
         log_every_n_steps=10,
     )
 
-    checkpoint_file = "models/checkpoints/best-osrs-retriever-epoch=01-val_loss=1.0369.ckpt"
+    checkpoint_file = "models/checkpoints/best-osrs-retriever-epoch=02-val_loss=1.0154.ckpt"
     checkpoint_path = Path(checkpoint_file)
 
     if checkpoint_path.is_file() and checkpoint_path.stat().st_size > 0:  # make sure ckpt is a file and has data/not corrupt

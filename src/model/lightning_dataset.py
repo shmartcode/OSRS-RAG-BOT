@@ -31,13 +31,7 @@ class OSRSTripletDataset(Dataset):
 
 class OSRSDataModule(pl.LightningDataModule):
 
-    def __init__(
-        self,
-        model_name="sentence-transformers/all-mpnet-base-v2",
-        batch_size=8,
-        max_query_length=64,
-        max_passage_length=384,
-    ):
+    def __init__(self, model_name="sentence-transformers/all-mpnet-base-v2", batch_size=8, max_query_length=64, max_passage_length=256):
         super().__init__()
         self.model_name = model_name
         self.batch_size = batch_size

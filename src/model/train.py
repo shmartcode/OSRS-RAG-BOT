@@ -1,3 +1,7 @@
+import os
+
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
@@ -32,7 +36,7 @@ def main():
         log_every_n_steps=10,
     )
 
-    checkpoint_file = "models/checkpoints/best-osrs-retriever-epoch=00-val_loss=1.1043.ckpt"
+    checkpoint_file = "models/checkpoints/best-osrs-retriever-epoch=01-val_loss=1.0369.ckpt"
     checkpoint_path = Path(checkpoint_file)
 
     if checkpoint_path.is_file() and checkpoint_path.stat().st_size > 0:  # make sure ckpt is a file and has data/not corrupt

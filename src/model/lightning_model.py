@@ -2,6 +2,7 @@ import torch
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from transformers import AutoModel, get_linear_schedule_with_warmup
+import gc
 
 
 class OSRSRetrieverModel(pl.LightningModule):
@@ -107,3 +108,13 @@ class OSRSRetrieverModel(pl.LightningModule):
                 "frequency": 1,
             },
         }
+
+    def on_train_epoch_end(self):
+        # Clears Python heap and GPU cache after every training epoch
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    def on_validation_epoch_end(self):
+        # Clears Python heap and GPU cache after evaluation completes
+        gc.collect()
+        torch.cuda.empty_cache()

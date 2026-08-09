@@ -3,9 +3,11 @@ import os
 import re
 import faiss
 import numpy as np
+import time
 from sentence_transformers import CrossEncoder, SentenceTransformer
 from drop_rate_formatter import enrich_retrieved_hit_with_drop_math
 from aliases import resolve_query_aliases
+from context_formatter import build_rag_prompt
 
 # =====================================================================
 # GLOBAL STATELESS HELPERS
@@ -346,12 +348,14 @@ class LocalRAGRetriever:
 
     def _vector_search_and_rerank(self, query_text: str, intent_info: dict, top_k: int = 5) -> list[dict]:
         """Search helper that runs FAISS search, Cross-Encoder rerank, soft intent boosting, and drop math enrichment."""
+        t0 = time.perf_counter()
         # 1. FAISS Search (Fetch broad candidates pool)
         query_vector = self.model.encode([query_text]).astype(np.float32)
         faiss.normalize_L2(query_vector)
 
         fetch_k = max(top_k * 10, 50)
         distances, indices = self.index.search(query_vector, k=fetch_k)
+        t_faiss = time.perf_counter() - t0
 
         raw_candidates = []
         for score, idx in zip(distances[0], indices[0]):
@@ -367,6 +371,7 @@ class LocalRAGRetriever:
         if not raw_candidates:
             return []
 
+        t1 = time.perf_counter()
         # 2. Pre-Rerank Intent Boost (Brings strategy pages into top rerank candidate window)
         pre_boosted = [dict(c) for c in raw_candidates]
         pre_boosted = self._apply_intent_boosting(pre_boosted, intent_info)
@@ -380,6 +385,7 @@ class LocalRAGRetriever:
             pairs.append([query_text, f"{title}: {text}"])
 
         rerank_scores = self.reranker.predict(pairs)
+        t_rerank = time.perf_counter() - t1
 
         # 4. Attach Cross-Encoder Scores + Title Boost
         for c, r_score in zip(candidates_to_rerank, rerank_scores):
@@ -406,6 +412,8 @@ class LocalRAGRetriever:
         for hit in final_hits:
             if hit.get("metadata", {}).get("category") == "Monster":
                 enrich_retrieved_hit_with_drop_math(hit, query_text)
+
+        print(f"[LATENCY] FAISS: {t_faiss*1000:.1f}ms | Reranker (10 items): {t_rerank*1000:.1f}ms")
 
         return final_hits
 
@@ -438,13 +446,23 @@ if __name__ == "__main__":
         "How do i kill bandos?",
     ]
 
-    for q in test_queries:
-        print(f"\n==========================================")
-        print(f"SEARCH QUERY: '{q}'")
-        print(f"==========================================")
-        hits = retriever.search(q, top_k=5)
+    # for q in test_queries:
+    #     print(f"\n==========================================")
+    #     print(f"SEARCH QUERY: '{q}'")
+    #     print(f"==========================================")
+    #     hits = retriever.search(q, top_k=5)
 
-        for i, hit in enumerate(hits, 1):
-            print(f"[{i}] Category: {hit['metadata'].get('category')}")
-            print(f"Title: {hit['metadata'].get('title')}")
-            print(f"Content Preview:\n{hit['metadata'].get('text', '')[:250]}\n")
+    #     for i, hit in enumerate(hits, 1):
+    #         print(f"[{i}] Category: {hit['metadata'].get('category')}")
+    #         print(f"Title: {hit['metadata'].get('title')}")
+    #         print(f"Content Preview:\n{hit['metadata'].get('text', '')[:250]}\n")
+
+    retriever = LocalRAGRetriever()
+    query = "How do i kill bandos?"
+
+    hits = retriever.search(query, top_k=3)
+    full_prompt = build_rag_prompt(query, hits)
+
+    print(f"\n=== GENERATED PROMPT PREVIEW === ({len(full_prompt)})")
+    # print(full_prompt[:1500])
+    print(full_prompt)

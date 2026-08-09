@@ -5,9 +5,9 @@ import faiss
 import numpy as np
 import time
 from sentence_transformers import CrossEncoder, SentenceTransformer
-from drop_rate_formatter import enrich_retrieved_hit_with_drop_math
-from aliases import resolve_query_aliases
-from context_formatter import build_rag_prompt
+from rag.drop_rate_formatter import enrich_retrieved_hit_with_drop_math
+from rag.aliases import resolve_query_aliases
+from rag.context_formatter import build_rag_prompt
 
 # =====================================================================
 # GLOBAL STATELESS HELPERS

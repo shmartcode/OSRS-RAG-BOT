@@ -1,0 +1,33 @@
+
+# Heavy Raw Data & Training Datasets (Exclude)
+data/raw/
+**/*pairs*.json
+**/*raw*
+
+# Training Scripts & Intermediate Artifacts (Exclude)
+train.py
+lightning_dataset.py
+load_from_ckpt.py
+lightning_logs/
+checkpoints/
+**/*.ckpt
+**/*.pt
+**/*.pth
+**/*.bin
+**/*.onnx
+
+# Python Caches & Environments (Exclude)
+.venv/
+venv/
+env/
+__pycache__/
+**/__pycache__/*
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Git & Repository Junk (Exclude)
+.git/
+.gitignore
+README.md

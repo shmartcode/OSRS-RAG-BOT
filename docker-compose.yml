@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: osrs_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: [ "/bin/sh", "-c", "ollama serve & sleep 5 && ollama pull llama3.1:8b && tail -f /dev/null" ]
+    restart: always
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
+  rag_app:
+    build: .
+    container_name: osrs_rag_app
+    stdin_open: true
+    tty: true
+    environment:
+      - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ollama:11434/v1}
+      - LOCAL_MODEL_NAME=${LOCAL_MODEL_NAME:-llama3.1:8b}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - ollama
+
+volumes:
+  ollama_data:

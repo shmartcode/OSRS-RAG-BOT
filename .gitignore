@@ -20,6 +20,7 @@ runs/
 *.pt
 *.pth
 *.pth.tar
+**/*pairs*.json
 fine_tuned_osrs_embedder/
 fine_tuned_osrs_embedder_epoch*/
 fine_tuned_osrs_embedder_v2

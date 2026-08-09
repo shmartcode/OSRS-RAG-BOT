@@ -26,7 +26,7 @@ class ConversationSession:
         """Saves the last retrieved vector hits for context pinning or inspectability."""
         self.last_retrieved_hits = hits
 
-    def get_chat_history() -> List[Dict[str, str]]:
+    def get_chat_history(self) -> List[Dict[str, str]]:
         """Returns full chat history for LLM message payloads."""
         return self.history
 

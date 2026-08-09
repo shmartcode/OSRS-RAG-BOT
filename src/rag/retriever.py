@@ -5,9 +5,9 @@ import faiss
 import numpy as np
 import time
 from sentence_transformers import CrossEncoder, SentenceTransformer
-from rag.drop_rate_formatter import enrich_retrieved_hit_with_drop_math
-from rag.aliases import resolve_query_aliases
-from rag.context_formatter import build_rag_prompt
+from src.rag.drop_rate_formatter import enrich_retrieved_hit_with_drop_math
+from src.rag.aliases import resolve_query_aliases
+from src.rag.context_formatter import build_rag_prompt
 
 # =====================================================================
 # GLOBAL STATELESS HELPERS
@@ -217,26 +217,40 @@ class LocalRAGRetriever:
         return records
 
     def _extract_target_item_name(self, query: str) -> str:
-        """Search helper that extracts the target item keyword from the query text."""
-        q_lower = query.lower()
-        stopwords = [
-            "what monsters drop",
-            "monster that drops",
-            "monsters that drop",
-            "what drops the",
-            "what drops",
-            "who drops the",
-            "who drops",
-            "dropped by",
-            "drop rate of",
-            "drop chance of",
-            "drop rate",
-            "from",
-            "the",
+        """
+        Extracts the target item keyword from a natural language query.
+        Handles prefixes, suffixes, question wrappers, and basic plurals.
+        """
+        clean_q = query.lower().strip()
+
+        # 1. Strip common action/question prefixes (from start of query)
+        prefix_pattern = r"^(?:what|which|who|where|how|can you|tell me|list)\s+(?:monsters?|mobs?|bosses?|enemies?|npcs?)?\s*(?:that|can|do|will|would)?\s*(?:drop|drops|dropped|give|gives|yield|yields|farm|get|obtain|find|kill for)\s+(?:the|a|an)?\s*"
+        clean_q = re.sub(prefix_pattern, "", clean_q)
+
+        # 2. Strip common passive/suffix patterns (e.g., "what is ... dropped by", "where to get ... from")
+        suffix_pattern = r"\s+(?:dropped by|drops from|obtained from|farmed from|from|sources?)$"
+        clean_q = re.sub(suffix_pattern, "", clean_q)
+
+        # 3. Clean up remaining standalone drop/get filler phrases anywhere
+        filler_patterns = [
+            r"\bdrop\s+rates?\s+(?:of|for)?\b",
+            r"\bdrop\s+chances?\s+(?:of|for)?\b",
+            r"\bwhere\s+to\s+(?:get|find|farm|obtain)\b",
+            r"\bhow\s+to\s+(?:get|find|farm|obtain)\b",
+            r"\bwhat\s+(?:drops|gives)\b",
+            r"\bwho\s+(?:drops|gives)\b",
         ]
-        clean_q = q_lower
-        for word in stopwords:
-            clean_q = clean_q.replace(word, " ")
+        for pattern in filler_patterns:
+            clean_q = re.sub(pattern, " ", clean_q)
+
+        # 4. Strip leading/trailing articles and punctuation
+        clean_q = re.sub(r"^(?:the|a|an)\s+", "", clean_q)
+        clean_q = clean_q.strip("? .!,").strip()
+
+        # 5. Basic OSRS singularization (scimitars -> scimitar, boots -> boots [preserved])
+        # Only trim trailing 's' if it's not a known item that stays plural (e.g., boots, log)
+        if clean_q.endswith("s") and not clean_q.endswith(("ss", "boots", "gloves", "vambs", "chaps", "logs")):
+            clean_q = clean_q[:-1]
 
         return clean_q.strip()
 

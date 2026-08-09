@@ -7,7 +7,7 @@ sys.path.extend(["src", "src/model"])
 
 from lightning_model import OSRSRetrieverModel
 
-ckpt_path = "models/checkpoints/best-osrs-retriever-epoch=05-val_loss=0.9906.ckpt"
+ckpt_path = "checkpoints/best-osrs-retriever-epoch=05-val_loss=0.9906.ckpt"
 output_dir = Path("fine_tuned_osrs_embedder_v2")
 output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -16,7 +16,7 @@ def main():
 
     # Save checkpoint with lowest val_loss
     checkpoint_callback = ModelCheckpoint(
-        dirpath="models/checkpoints",
+        dirpath="checkpoints",
         filename="best-osrs-retriever-{epoch:02d}-{val_loss:.4f}",
         monitor="val_loss",
         mode="min",
@@ -36,7 +36,7 @@ def main():
         log_every_n_steps=10,
     )
 
-    checkpoint_file = "models/checkpoints/best-osrs-retriever-epoch=02-val_loss=1.0154.ckpt"
+    checkpoint_file = "checkpoints/best-osrs-retriever-epoch=02-val_loss=0.9906.ckpt"
     checkpoint_path = Path(checkpoint_file)
 
     if checkpoint_path.is_file() and checkpoint_path.stat().st_size > 0:  # make sure ckpt is a file and has data/not corrupt

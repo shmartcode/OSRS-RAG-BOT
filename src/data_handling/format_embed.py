@@ -6,63 +6,199 @@ from sentence_transformers import SentenceTransformer
 
 
 def build_monster_text(record: dict) -> str:
-    """Builds a compact, token-dense text representation for monsters (<150 tokens)."""
-    title = record.get("name", record.get("title", "Unknown"))
+    """Builds a comprehensive text block containing all monster attributes for embeddings and LLM context."""
+    parts = []
+
+    # 1. Identity & Core Overview
+    name = record.get("name") or record.get("title", "Unknown Monster")
     combat = record.get("combat_level", "N/A")
     hp = record.get("hitpoints", "N/A")
-    slayer = record.get("slayer_level", 0)
+    max_hit = record.get("max_hit", "N/A")
+    parts.append(f"[Monster] {name} | Combat Level: {combat} | HP: {hp} | Max Hit: {max_hit}")
 
-    attrs = ", ".join(record.get("attributes", [])) if record.get("attributes") else "None"
-    masters = ", ".join(record.get("slayer_masters", [])) if record.get("slayer_masters") else "None"
-    examine = record.get("examine", "")
+    if examine := record.get("examine"):
+        parts.append(f"Examine: {examine}")
 
-    # Format drops into concise "Item (Rarity%)" pairs
+    # 2. General Attributes & Flags
+    flags = []
+    flags.append(f"Members: {'Yes' if record.get('members') else 'No'}")
+    if record.get("aggressive"):
+        flags.append("Aggressive: Yes")
+    if record.get("poisonous"):
+        flags.append("Poisonous: Yes")
+    if record.get("slayer_level"):
+        flags.append(f"Slayer Level Req: {record['slayer_level']}")
+    if record.get("slayer_exp"):
+        flags.append(f"Slayer XP: {record['slayer_exp']}")
+    parts.append("General: " + ", ".join(flags))
+
+    # 3. Combat Parameters & Classifications
+    atk_types = record.get("attack_type", [])
+    if isinstance(atk_types, list) and atk_types:
+        parts.append(f"Attack Type(s): {', '.join(atk_types)}")
+    if record.get("attack_speed"):
+        parts.append(f"Attack Speed: {record['attack_speed']} ticks")
+
+    attrs = record.get("attributes", [])
+    if isinstance(attrs, list) and attrs:
+        parts.append(f"Attributes: {', '.join(attrs)}")
+
+    masters = record.get("slayer_masters", [])
+    if isinstance(masters, list) and masters:
+        parts.append(f"Slayer Masters: {', '.join(masters)}")
+
+    # 4. Levels & Combat Stats
+    level_fields = [
+        ("Attack", record.get("attack_level")),
+        ("Strength", record.get("strength_level")),
+        ("Defence", record.get("defence_level")),
+        ("Magic", record.get("magic_level")),
+        ("Ranged", record.get("ranged_level")),
+    ]
+    active_levels = [f"{lbl}: {val}" for lbl, val in level_fields if val is not None]
+    if active_levels:
+        parts.append("Levels: " + ", ".join(active_levels))
+
+    # 5. Offensive Bonuses & Defensive Stats (filtering out 0s where appropriate, keeping key ones)
+    offensive = []
+    for lbl, key in [
+        ("Melee Atk", "attack_bonus"),
+        ("Melee Str", "strength_bonus"),
+        ("Magic Atk", "attack_magic"),
+        ("Magic Bonus", "magic_bonus"),
+        ("Ranged Atk", "attack_ranged"),
+        ("Ranged Bonus", "ranged_bonus"),
+    ]:
+        val = record.get(key, 0)
+        if val != 0:
+            offensive.append(f"{lbl}: {val:+d}" if isinstance(val, int) else f"{lbl}: {val}")
+    if offensive:
+        parts.append("Offensive Stats: " + ", ".join(offensive))
+
+    defensive = []
+    for lbl, key in [
+        ("Stab Def", "defence_stab"),
+        ("Slash Def", "defence_slash"),
+        ("Crush Def", "defence_crush"),
+        ("Magic Def", "defence_magic"),
+        ("Ranged Def", "defence_ranged"),
+    ]:
+        val = record.get(key, 0)
+        defensive.append(f"{lbl}: {val:+d}" if isinstance(val, int) else f"{lbl}: {val}")
+    if defensive:
+        parts.append("Defensive Stats: " + ", ".join(defensive))
+
+    # 6. Drop Table Summary
     drop_strs = []
     for d in record.get("drops", []):
-        name = d.get("name")
+        d_name = d.get("name")
         rarity = d.get("rarity")
-        if name and rarity is not None:
+        if d_name and rarity is not None:
             if rarity >= 1.0:
-                drop_strs.append(name)
+                drop_strs.append(d_name)
             else:
                 pct = f"{rarity * 100:.2f}%".rstrip("0").rstrip(".")
-                drop_strs.append(f"{name} ({pct}%)")
+                drop_strs.append(f"{d_name} ({pct}%)")
 
     drops_summary = ", ".join(drop_strs) if drop_strs else "None"
+    parts.append(f"Drops: {drops_summary}")
 
-    return (
-        f"[Monster] {title} | Combat: {combat} | HP: {hp} | Slayer: {slayer} | Attributes: {attrs} | Masters: {masters}\n"
-        f"Examine: {examine}\n"
-        f"Drops: {drops_summary}"
-    )
+    return "\n".join(parts)
 
 
 def build_item_text(record: dict) -> str:
-    """Builds a compact text representation for items."""
-    name = record.get("name", "Unknown")
-    examine = record.get("examine", "")
-    members = record.get("members", False)
-    value = record.get("value", 0)
-    highalch = record.get("highalch", 0)
+    """Builds a comprehensive text block containing all item attributes for embeddings and LLM context."""
+    parts = []
 
+    # 1. Base Identity
+    name = record.get("name") or record.get("title", "Unknown Item")
+    parts.append(f"[Item] {name}")
+
+    if examine := record.get("examine"):
+        parts.append(f"Examine: {examine}")
+
+    # 2. Economy & Properties
+    details = []
+    details.append(f"Members: {'Yes' if record.get('members') else 'No'}")
+    details.append(f"Tradeable: {'Yes' if record.get('tradeable') else 'No'}")
+    if record.get("quest_item"):
+        details.append("Quest Item: Yes")
+    if value := record.get("value"):
+        details.append(f"Base Value: {value:,} gp")
+    if lowalch := record.get("lowalch"):
+        details.append(f"Low Alch: {lowalch:,} gp")
+    if highalch := record.get("highalch"):
+        details.append(f"High Alch: {highalch:,} gp")
+    if weight := record.get("weight"):
+        details.append(f"Weight: {weight} kg")
+    parts.append("Properties: " + ", ".join(details))
+
+    # 3. Requirement Stats
     reqs = record.get("requirement_stats", {})
-    req_str = ", ".join([f"{k}: {v}" for k, v in reqs.items()]) if reqs else "None"
+    if isinstance(reqs, dict) and reqs:
+        req_list = [f"{k.replace('_', ' ').title()} {v}" for k, v in reqs.items() if v]
+        if req_list:
+            parts.append(f"Requirements: {', '.join(req_list)}")
 
+    # 4. Equipment Stats (filtering out 0 values)
     eq = record.get("equipment_stats", {})
-    slot = eq.get("slot", "N/A") if isinstance(eq, dict) else "N/A"
+    if isinstance(eq, dict) and eq:
+        active_eq = []
+        for stat_name, stat_val in eq.items():
+            if isinstance(stat_val, (int, float)) and stat_val != 0:
+                formatted_val = f"+{stat_val}" if stat_val > 0 else f"{stat_val}"
+                active_eq.append(f"{stat_name.replace('_', ' ').title()}: {formatted_val}")
+            elif isinstance(stat_val, str) and stat_val:
+                active_eq.append(f"{stat_name.title()}: {stat_val}")
+        if active_eq:
+            parts.append("Equipment Stats: " + ", ".join(active_eq))
 
-    return f"[Item] {name} | Slot: {slot} | Members: {members} | HighAlch: {highalch} gp | Reqs: {req_str}\n" f"Examine: {examine}"
+    # 5. Weapon Stats
+    wpn = record.get("weapon_stats", {})
+    if isinstance(wpn, dict) and wpn:
+        wpn_list = []
+        for k, v in wpn.items():
+            if v:
+                clean_key = k.replace("_", " ").title()
+                if isinstance(v, list):
+                    wpn_list.append(f"{clean_key}: {', '.join(map(str, v))}")
+                elif isinstance(v, dict):
+                    sub_str = ", ".join([f"{sk}: {sv}" for sk, sv in v.items()])
+                    wpn_list.append(f"{clean_key}: [{sub_str}]")
+                else:
+                    wpn_list.append(f"{clean_key}: {v}")
+        if wpn_list:
+            parts.append("Weapon Properties: " + ", ".join(wpn_list))
+
+    return "\n".join(parts)
 
 
 def build_prayer_text(record: dict) -> str:
-    """Builds a compact text representation for prayers."""
-    name = record.get("name", "Unknown")
-    desc = record.get("description", "")
-    drain = record.get("drain_per_minute", 0)
-    reqs = record.get("requirements", {})
-    req_str = ", ".join([f"{k}: {v}" for k, v in reqs.items()]) if reqs else "None"
+    """Builds a comprehensive text block containing all prayer attributes for embeddings and LLM context."""
+    parts = []
 
-    return f"[Prayer] {name} | Drain Rate: {drain}/min | Reqs: {req_str}\n" f"Description: {desc}"
+    name = record.get("name", "Unknown Prayer")
+    parts.append(f"[Prayer] {name}")
+
+    if desc := record.get("description"):
+        parts.append(f"Description: {desc}")
+
+    parts.append(f"Members: {'Yes' if record.get('members') else 'No'}")
+    parts.append(f"Drain Rate: {record.get('drain_per_minute', 0)} points/min")
+
+    reqs = record.get("requirements", {})
+    if isinstance(reqs, dict) and reqs:
+        req_str = ", ".join([f"{k.replace('_', ' ').title()} {v}" for k, v in reqs.items() if v])
+        parts.append(f"Requirements: {req_str}")
+    else:
+        parts.append("Requirements: None")
+
+    bonuses = record.get("bonuses", {})
+    if isinstance(bonuses, dict) and bonuses:
+        bonus_str = ", ".join([f"{k.replace('_', ' ').title()}: {v}" for k, v in bonuses.items() if v])
+        parts.append(f"Bonuses: {bonus_str}")
+
+    return "\n".join(parts)
 
 
 def process_embedding():
@@ -120,19 +256,33 @@ def process_embedding():
                         documents.append(text)
                         title = record.get("title", record.get("name", "Unknown"))
 
-                        # 2. Preserve raw structured fields in metadata for Python reranking
+                        # 2. Preserve raw structured fields in metadata entry for Python logic
                         meta_entry = {
                             "source": file_name,
+                            "id": record.get("id"),
                             "title": title,
                             "category": category,
                             "text": text,
                         }
 
-                        # Crucial: attach raw drops array so get_monster_drop_rate_for_query() can read it
-                        if "drops" in record:
-                            meta_entry["drops"] = record["drops"]
-                        if "slayer_level" in record:
-                            meta_entry["slayer_level"] = record["slayer_level"]
+                        # Preserve entity-specific fields for programmatic access
+                        if "items" in file_name:
+                            meta_entry["equipment_stats"] = record.get("equipment_stats", {})
+                            meta_entry["weapon_stats"] = record.get("weapon_stats", {})
+                            meta_entry["requirement_stats"] = record.get("requirement_stats", {})
+                            meta_entry["highalch"] = record.get("highalch", 0)
+
+                        elif "monsters" in file_name:
+                            if "drops" in record:
+                                meta_entry["drops"] = record["drops"]
+                            if "slayer_level" in record:
+                                meta_entry["slayer_level"] = record["slayer_level"]
+                            meta_entry["combat_level"] = record.get("combat_level")
+                            meta_entry["hitpoints"] = record.get("hitpoints")
+
+                        elif "prayers" in file_name:
+                            meta_entry["drain_per_minute"] = record.get("drain_per_minute", 0)
+                            meta_entry["requirements"] = record.get("requirements", {})
 
                         metadata.append(meta_entry)
 

@@ -1,104 +1,168 @@
-import json
-import os
-import faiss
-import numpy as np
-import torch
-from sentence_transformers import SentenceTransformer
+import time
+from typing import Dict, List
+import sys
+from pathlib import Path
 
-# -----------------------------------------------------------------------------
-# Configuration & Paths
-# -----------------------------------------------------------------------------
-MODEL_PATH = "fine_tuned_osrs_embedder_epoch2"
-PROCESSED_DIR = "data/processed"
-INDEX_PATH = os.path.join(PROCESSED_DIR, "vector_index.faiss")
+root_dir = Path(__file__).resolve().parents[2]
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+# Adjust imports based on your project structure
+from src.rag.retriever import LocalRAGRetriever
+from src.rag.retriever import route_query_intent
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# Define test suite covering critical OSRS RAG edge cases
+TEST_SUITE: Dict[str, List[Dict[str, str]]] = {
+    "1. Spell Costs & Templates": [
+        {
+            "query": "What runes are required for High Level Alchemy?",
+            "expected_tokens": ["Nature", "Fire", "1", "5"],
+            "expected_category": None,
+        },
+        {
+            "query": "What are the rune costs for Ice Barrage?",
+            "expected_tokens": ["Blood", "Death", "Water"],
+            "expected_category": None,
+        },
+    ],
+    "2. Item Stats & Properties": [
+        {
+            "query": "What are the stats of an Abyssal whip?",
+            "expected_tokens": ["Slash", "82", "Melee strength"],
+            "expected_category": "Item",
+        },
+        {
+            "query": "How much slash attack bonus does a Dragon dagger have?",
+            "expected_tokens": ["Slash", "dagger"],
+            "expected_category": "Item",
+        },
+        {
+            "query": "What is the attack speed and bonuses of the Toxic blowpipe?",
+            "expected_tokens": ["Ranged", "speed"],
+            "expected_category": "Item",
+        },
+    ],
+    "3. High-Volume Drop Tables": [
+        {
+            "query": "What monsters drop rune scimitars?",
+            "expected_tokens": ["Fire giant", "drop"],
+            "expected_category": "Monster",
+        },
+        {
+            "query": "What monsters drop a Dragon spear?",
+            "expected_tokens": ["drop"],
+            "expected_category": "Monster",
+        },
+    ],
+    "4. Hard Numbers & Requirements": [
+        {
+            "query": "What level Smithing do I need to make a Rune Platebody?",
+            "expected_tokens": ["99", "Smithing"],
+            "expected_category": None,
+        },
+        {
+            "query": "How many Gold nuggets do I need for the Prospector outfit?",
+            "expected_tokens": ["180", "Prospector"],
+            "expected_category": None,
+        },
+        {
+            "query": "What level Thieving is required for Master Farmers?",
+            "expected_tokens": ["38", "Thieving"],
+            "expected_category": None,
+        },
+    ],
+    "5. Non-Combat Acquisition & Shops": [
+        {
+            "query": "Where can I buy Nature runes from shops?",
+            "expected_tokens": ["Mage Arena", "shop"],
+            "expected_category": None,
+        },
+        {
+            "query": "Where can I get a Rune scimitar without killing monsters?",
+            "expected_tokens": ["Smithing"],
+            "expected_category": None,
+        },
+    ],
+    "6. Hallucination Resistance & Mechanics": [
+        {
+            "query": "What monsters drop the Torva full helm?",
+            "expected_tokens": ["Nex"],
+            "expected_category": "Monster",
+        },
+        {
+            "query": "What drops the Fire Cape?",
+            "expected_tokens": ["TzTok-Jad", "Fight Caves"],
+            "expected_category": "Monster",
+        },
+    ],
+}
 
 
-def load_all_metadata():
-    """
-    Loads and merges all metadata JSON files in the order that matches
-    how build_vector_index.py stacked the numpy embedding arrays.
-    """
-    embedding_files = sorted([f for f in os.listdir(PROCESSED_DIR) if f.endswith("_embeddings.npy")])
-    combined_metadata = []
+def run_pipeline_tests():
+    print("==================================================")
+    print("     OSRS RAG Pipeline Benchmark & Query Test     ")
+    print("==================================================\n")
 
-    for emb_file in embedding_files:
-        meta_file = emb_file.replace("_embeddings.npy", "_metadata.json")
-        meta_path = os.path.join(PROCESSED_DIR, meta_file)
+    retriever = LocalRAGRetriever()
+    total_tests = 0
+    passed_tests = 0
 
-        if os.path.exists(meta_path):
-            with open(meta_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                combined_metadata.extend(data)
-        else:
-            print(f"Warning: Metadata file {meta_file} missing for {emb_file}")
+    start_time = time.time()
 
-    return combined_metadata
+    for category, tests in TEST_SUITE.items():
+        print(f"\n--- Category: {category} ---")
 
+        for test in tests:
+            total_tests += 1
+            query = test["query"]
+            expected_tokens = test["expected_tokens"]
+            expected_category = test.get("expected_category")
 
-def query_index(query_text, model, index, metadata, top_k=3):
-    """
-    Encodes a user prompt, searches FAISS, and returns formatted top-K results.
-    """
-    # 1. Encode and normalize query vector (matches train/encode behavior)
-    query_vector = model.encode([query_text], convert_to_numpy=True, normalize_embeddings=True).astype("float32")
+            # 1. Test Router Intent (if applicable)
+            actual_category = route_query_intent(query).get("prefer_category") if route_query_intent else "N/A"
+            actual_intent = route_query_intent(query).get("intent") if route_query_intent else "N/A"
+            if route_query_intent:
+                if actual_category == "Monster or Item":
+                    catgeory_match = expected_category in actual_category
+                else:
+                    catgeory_match = actual_category == expected_category
 
-    # 2. Search FAISS index
-    scores, indices = index.search(query_vector, top_k)
+            # 2. Test Retrieval
+            # Choose top_k dynamically if intent is drop_table
+            top_k = 6 if actual_intent == "monster_drops" else 3
+            results = retriever.search(query, top_k=top_k)
 
-    print(f"\n=======================================================")
-    print(f"Query: '{query_text}'")
-    print(f"=======================================================")
+            # Combine retrieved chunk texts into one string for inspection
+            retrieved_text = " ".join([str(chunk["metadata"].get("text", "")) for chunk in results])
 
-    for i in range(top_k):
-        idx = indices[0][i]
-        score = scores[0][i]
+            # Check if expected key tokens exist in retrieved context
+            found_tokens = [token for token in expected_tokens if token.lower() in retrieved_text.lower()]
+            token_match = len(found_tokens) == len(expected_tokens)
 
-        if idx < len(metadata):
-            item = metadata[idx]
-            category = item.get("category", "Unknown")
-            title = item.get("title", "Unknown")
-            text = item.get("text", "")
+            # Determine pass/fail status
+            test_passed = token_match and catgeory_match
+            if test_passed:
+                passed_tests += 1
+                status = "✅ PASS"
 
-            # Truncate text preview for clean terminal output
-            preview = text[:200] + "..." if len(text) > 200 else text
+            else:
+                status = "❌ FAIL"
 
-            print(f"\nRank {i+1} | Score: {score:.4f} | Category: [{category}]")
-            print(f"Title: {title}")
-            print(f"Content: {preview}")
-        else:
-            print(f"\nRank {i+1} | Index {idx} out of range for metadata bounds.")
+            # Print concise results per query
+            print(f"\n[{status}] Query: '{query}'")
+            print(f"  └─ Category: {actual_category} (Expected: {expected_category})")
+            print(f"  └─ Tokens Found: {len(found_tokens)}/{len(expected_tokens)} -> {found_tokens}")
 
+            if not test_passed:
+                top_title = results[0]["metadata"].get("title", "Unknown") if results else "None"
+                snippet = results[0]["metadata"].get("text", "")[:200] if results else "No context"
+                print(f"  └─ Top Match Title: {top_title}")
+                print(f"  └─ Snippet Preview: {snippet}...")
 
-def main():
-    if not os.path.exists(INDEX_PATH):
-        print(f"Error: Could not find FAISS index at {INDEX_PATH}")
-        print("Please run build_vector_index.py first.")
-        return
-
-    print("Loading fine-tuned embedding model...")
-    model = SentenceTransformer(MODEL_PATH, device=DEVICE)
-
-    print("Loading FAISS index...")
-    index = faiss.read_index(INDEX_PATH)
-
-    print("Loading metadata records...")
-    metadata = load_all_metadata()
-    print(f"Loaded {index.ntotal} vectors and {len(metadata)} metadata entries.")
-
-    # -------------------------------------------------------------------------
-    # Test Queries
-    # -------------------------------------------------------------------------
-    test_queries = [
-        "What stats are needed to wield an abyssal whip?",
-        "How much damage does a dragon dagger special attack do?",
-        "What monster drops the dragon boots?",
-    ]
-
-    for q in test_queries:
-        query_index(q, model, index, metadata, top_k=6)
+    elapsed = round(time.time() - start_time, 2)
+    print("\n==================================================")
+    print(f"RESULTS: {passed_tests}/{total_tests} tests passed in {elapsed}s")
+    print("==================================================")
 
 
 if __name__ == "__main__":
-    main()
+    run_pipeline_tests()

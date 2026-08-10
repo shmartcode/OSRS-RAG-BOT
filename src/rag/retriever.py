@@ -1,13 +1,13 @@
 import json
 import os
 import re
+import time
 import faiss
 import numpy as np
-import time
 from sentence_transformers import CrossEncoder, SentenceTransformer
-from src.rag.drop_rate_formatter import enrich_retrieved_hit_with_drop_math
 from src.rag.aliases import resolve_query_aliases
 from src.rag.context_formatter import build_rag_prompt
+from src.rag.drop_rate_formatter import enrich_retrieved_hit_with_drop_math
 
 # =====================================================================
 # GLOBAL STATELESS HELPERS
@@ -18,14 +18,11 @@ def route_query_intent(query: str) -> dict:
     """Analyzes user query to detect intent and return filtering/ranking rules."""
     query_lower = query.lower()
 
-    BUY_TRIGGERS = [
+    BUY_KEYWORDS = [
         "where to buy",
         "where can i buy",
         "buy",
         "buy the",
-        "shop",
-        "store",
-        "vendor",
         "ge price",
         "grand exchange",
         "cost",
@@ -35,9 +32,32 @@ def route_query_intent(query: str) -> dict:
         "worth",
     ]
 
-    MONSTER_TRIGGERS = ["stats", "slayer", "boss", "monster"]
+    SHOP_KEYWORDS = [
+        "shop",
+        "store",
+        "vendor",
+        "buy from shop",
+        "buy from shops",
+        "what shops",
+    ]
 
-    MONSTER_THAT_DROP_TRIGGERS = [
+    MONSTER_KEYWORDS = [
+        "hp",
+        "hitpoints",
+        "combat level",
+        "slayer",
+        "slayer level",
+        "xp",
+        "defence level",
+        "weakness",
+        "immune",
+        "aggressive",
+        "poisonous",
+        "boss",
+        "combat stats",
+    ]
+
+    MONSTER_THAT_DROP_KEYWORDS = [
         "drop",
         "drops",
         "drops the",
@@ -66,13 +86,48 @@ def route_query_intent(query: str) -> dict:
         "7:0",
     ]
 
-    is_strategy_query = any(kw in query_lower for kw in STRATEGY_KEYWORDS)
-    is_monsters_that_drop = any(trigger in query_lower for trigger in MONSTER_THAT_DROP_TRIGGERS)
-    is_buy_query = any(trigger in query_lower for trigger in BUY_TRIGGERS)
-    is_monster_query = any(trigger in query_lower for trigger in MONSTER_TRIGGERS)
+    ITEM_KEYWORDS = [
+        "bonus",
+        "bonuses",
+        "attack speed",
+        "ticks",
+        "slash",
+        "stab",
+        "crush",
+        "ranged strength",
+        "melee strength",
+        "magic damage",
+        "prayer bonus",
+        "weight",
+        "equip",
+        "slot",
+        "combat stats",
+        "style",
+        "attack bonuses",
+        "defense bonuses",
+        "other bonuses",
+    ]
+
+    SPELL_COST_KEYWORDS = [
+        "rune cost",
+        "runes to cast",
+        "how many runes",
+        "what runes",
+        "which runes",
+    ]
+
+    AMBIGUOUS_STATS = ["stats"]
+
+    is_strategy_query = any(keyword in query_lower for keyword in STRATEGY_KEYWORDS)
+    is_monsters_that_drop = any(keyword in query_lower for keyword in MONSTER_THAT_DROP_KEYWORDS)
+    is_buy_query = any(keyword in query_lower for keyword in BUY_KEYWORDS)
+    is_shop_query = any(keyword in query_lower for keyword in SHOP_KEYWORDS)
+    is_monster_query = any(keyword in query_lower for keyword in MONSTER_KEYWORDS)
+    is_item_query = any(keyword in query_lower for keyword in ITEM_KEYWORDS)
+    is_ambiguous_stats = any(keyword in query_lower for keyword in AMBIGUOUS_STATS)
+    is_spell_cost_query = any(keyword in query_lower for keyword in SPELL_COST_KEYWORDS)
 
     if is_strategy_query:
-        # Clean query to get the base monster/subject (e.g. "how do i kill general graardor" -> "general graardor")
         target_entity = query.lower()
         for kw in STRATEGY_KEYWORDS:
             target_entity = target_entity.replace(kw, "")
@@ -99,11 +154,35 @@ def route_query_intent(query: str) -> dict:
             "prefer_category": "GE_Price",
         }
 
+    if is_shop_query:
+        return {
+            "intent": "purchasing",
+            "is_strategy_query": False,
+            "prefer_category": None,
+        }
+
     if is_monster_query:
         return {
             "intent": "monster",
             "is_strategy_query": False,
             "prefer_category": "Monster",
+        }
+
+    if is_item_query:
+        return {
+            "intent": "item_bonuses",
+            "is_strategy_query": False,
+            "prefer_category": "Item",
+        }
+
+    if is_ambiguous_stats:
+        return {"intent": "ambiguous_stats", "is_strategy_query": False, "prefer_category": "Monster or Item"}
+
+    if is_item_query:
+        return {
+            "intent": "spell runes cost",
+            "is_strategy_query": False,
+            "prefer_category": None,
         }
 
     return {
@@ -120,27 +199,31 @@ def compute_title_boost(query_text: str, candidate_title: str, category: str) ->
 
     boost = 0.0
 
-    # 1. Heavily demote Combat Achievements and Task logs right away unless explicitly queried
-    achievement_terms = ["combat achievement", "combat diary", "grandmaster", "master", "elite", "hard task", "ca/"]
+    achievement_terms = [
+        "combat achievement",
+        "combat diary",
+        "grandmaster",
+        "master",
+        "elite",
+        "hard task",
+        "ca/",
+    ]
     has_achievement_title = any(term in t_lower for term in achievement_terms)
     query_asks_achievement = any(term in q_lower for term in ["achievement", "task", "diary", "grandmaster", "ca"])
 
     if has_achievement_title and not query_asks_achievement:
-        return -10.0  # Immediately drop achievement pages out of top rankings
+        return -10.0
 
-    # 2. Skip variant penalties for strategy subpages
     if "/strategies" in t_lower or "/guide" in t_lower or category == "Strategy":
-        boost += 3.0  # Extra safety boost for strategy pages
+        boost += 3.0
         return boost
 
-    # 3. Base title match
     if t_lower in q_lower or q_lower in t_lower:
         boost += 2.0
 
     if category == "Item" and t_lower in q_lower:
         boost += 1.0
 
-    # 4. Standard parenthetical variant penalty (e.g., location/quest variants)
     has_variant_in_title = bool(re.search(r"\(.*?\)", t_lower))
     has_variant_in_query = "(" in q_lower or ")" in q_lower
 
@@ -217,21 +300,15 @@ class LocalRAGRetriever:
         return records
 
     def _extract_target_item_name(self, query: str) -> str:
-        """
-        Extracts the target item keyword from a natural language query.
-        Handles prefixes, suffixes, question wrappers, and basic plurals.
-        """
+        """Extracts target item keyword from natural language queries."""
         clean_q = query.lower().strip()
 
-        # 1. Strip common action/question prefixes (from start of query)
         prefix_pattern = r"^(?:what|which|who|where|how|can you|tell me|list)\s+(?:monsters?|mobs?|bosses?|enemies?|npcs?)?\s*(?:that|can|do|will|would)?\s*(?:drop|drops|dropped|give|gives|yield|yields|farm|get|obtain|find|kill for)\s+(?:the|a|an)?\s*"
         clean_q = re.sub(prefix_pattern, "", clean_q)
 
-        # 2. Strip common passive/suffix patterns (e.g., "what is ... dropped by", "where to get ... from")
         suffix_pattern = r"\s+(?:dropped by|drops from|obtained from|farmed from|from|sources?)$"
         clean_q = re.sub(suffix_pattern, "", clean_q)
 
-        # 3. Clean up remaining standalone drop/get filler phrases anywhere
         filler_patterns = [
             r"\bdrop\s+rates?\s+(?:of|for)?\b",
             r"\bdrop\s+chances?\s+(?:of|for)?\b",
@@ -243,25 +320,33 @@ class LocalRAGRetriever:
         for pattern in filler_patterns:
             clean_q = re.sub(pattern, " ", clean_q)
 
-        # 4. Strip leading/trailing articles and punctuation
         clean_q = re.sub(r"^(?:the|a|an)\s+", "", clean_q)
         clean_q = clean_q.strip("? .!,").strip()
 
-        # 5. Basic OSRS singularization (scimitars -> scimitar, boots -> boots [preserved])
-        # Only trim trailing 's' if it's not a known item that stays plural (e.g., boots, log)
-        if clean_q.endswith("s") and not clean_q.endswith(("ss", "boots", "gloves", "vambs", "chaps", "logs")):
+        preserved_plurals = (
+            "ss",
+            "boots",
+            "gloves",
+            "vambs",
+            "chaps",
+            "logs",
+            "bones",
+            "barrows",
+            "coins",
+        )
+        if clean_q.endswith("s") and not clean_q.endswith(preserved_plurals):
             clean_q = clean_q[:-1]
 
         return clean_q.strip()
 
-    def _try_aggregated_drop_search(self, query_text: str, top_k_monsters: int = 5) -> list[dict]:
+    def _try_aggregated_drop_search(self, query_text: str, top_k_monsters: int = 10) -> list[dict]:
         """Scans metadata directly to aggregate all monsters dropping the requested item."""
         target_item = self._extract_target_item_name(query_text)
         if not target_item or len(target_item) < 3:
             return []
 
         matching_monsters = []
-        seen_monsters = set()  # Track unique monster names
+        seen_monsters = set()
 
         for record in self.metadata_records:
             if record.get("category") != "Monster":
@@ -334,36 +419,40 @@ class LocalRAGRetriever:
         return [synthetic_hit]
 
     def _apply_intent_boosting(self, candidates: list[dict], intent_info: dict) -> list[dict]:
-        """Applies soft multipliers based on query intent rather than hard filtering."""
+        """Applies soft score adjustments based on intent."""
         is_strategy = intent_info.get("is_strategy_query", False)
         prefer_cat = intent_info.get("prefer_category")
         target_entity = (intent_info.get("target_entity") or "").strip().lower()
 
-        for c in candidates:
+        boosted_candidates = []
+        for orig in candidates:
+            c = dict(orig)  # Shallow copy to prevent mutating raw reference
             title = (c["metadata"].get("title") or c["metadata"].get("name", "")).lower().strip()
             category = c["metadata"].get("category", "")
 
             if is_strategy:
-                # Rank 1 priority: Strategy subpages or explicit Strategy category
                 if "/strategies" in title or "strategy" in title or "guide" in title or category == "Strategy":
                     c["score"] += 8.0
-                # Rank 2 priority: Main Monster entry page matching the target entity
                 elif category == "Monster" or (target_entity and (target_entity in title or title in target_entity)):
                     c["score"] += 4.0
-                # Heavy demotion for Combat Achievements, Logs, and Drop Tables during strategy queries
                 elif category == "Drop_Table" or "achievement" in title or "combat achievement" in title:
                     c["score"] -= 10.0
 
             elif prefer_cat and category == prefer_cat:
                 c["score"] += 1.5
 
-        candidates.sort(key=lambda x: x["score"], reverse=True)
-        return candidates
+            elif prefer_cat and category in prefer_cat:
+                c["score"] += 1.5
+
+            boosted_candidates.append(c)
+
+        boosted_candidates.sort(key=lambda x: x["score"], reverse=True)
+        return boosted_candidates
 
     def _vector_search_and_rerank(self, query_text: str, intent_info: dict, top_k: int = 5) -> list[dict]:
-        """Search helper that runs FAISS search, Cross-Encoder rerank, soft intent boosting, and drop math enrichment."""
+        """Runs FAISS search, Cross-Encoder rerank, and title boost."""
         t0 = time.perf_counter()
-        # 1. FAISS Search (Fetch broad candidates pool)
+
         query_vector = self.model.encode([query_text]).astype(np.float32)
         faiss.normalize_L2(query_vector)
 
@@ -386,12 +475,10 @@ class LocalRAGRetriever:
             return []
 
         t1 = time.perf_counter()
-        # 2. Pre-Rerank Intent Boost (Brings strategy pages into top rerank candidate window)
-        pre_boosted = [dict(c) for c in raw_candidates]
-        pre_boosted = self._apply_intent_boosting(pre_boosted, intent_info)
+
+        pre_boosted = self._apply_intent_boosting(raw_candidates, intent_info)
         candidates_to_rerank = pre_boosted[:15]
 
-        # 3. Cross-Encoder Rerank
         pairs = []
         for c in candidates_to_rerank:
             title = c["metadata"].get("title") or c["metadata"].get("name", "")
@@ -401,18 +488,16 @@ class LocalRAGRetriever:
         rerank_scores = self.reranker.predict(pairs)
         t_rerank = time.perf_counter() - t1
 
-        # 4. Attach Cross-Encoder Scores + Title Boost
         for c, r_score in zip(candidates_to_rerank, rerank_scores):
             title = c["metadata"].get("title") or c["metadata"].get("name", "")
             cat = c["metadata"].get("category", "")
             c["score"] = float(r_score) + compute_title_boost(query_text, title, cat)
 
-        # 5. Post-Rerank Intent Adjustment & Deduplication
-        ranked_candidates = self._apply_intent_boosting(candidates_to_rerank, intent_info)
+        candidates_to_rerank.sort(key=lambda x: x["score"], reverse=True)
 
         deduped = []
         seen_keys = set()
-        for c in ranked_candidates:
+        for c in candidates_to_rerank:
             title = c["metadata"].get("title") or c["metadata"].get("name", "")
             category = c["metadata"].get("category", "")
             key = f"{title.lower()}_{category.lower()}"
@@ -422,61 +507,22 @@ class LocalRAGRetriever:
 
         final_hits = deduped[:top_k]
 
-        # 6. Enrich Monster Hits with Math
         for hit in final_hits:
             if hit.get("metadata", {}).get("category") == "Monster":
                 enrich_retrieved_hit_with_drop_math(hit, query_text)
 
-        print(f"[LATENCY] FAISS: {t_faiss*1000:.1f}ms | Reranker (10 items): {t_rerank*1000:.1f}ms")
+        print(f"[LATENCY] FAISS: {t_faiss*1000:.1f}ms | Reranker ({len(candidates_to_rerank)} items): {t_rerank*1000:.1f}ms")
 
         return final_hits
 
     def search(self, query_text: str, top_k: int = 5) -> list[dict]:
-        """Main search function."""
+        """Main search entrypoint."""
         canonical_query = resolve_query_aliases(query_text)
         intent_info = route_query_intent(canonical_query)
 
-        # 1. Fast Path: Aggregated metadata drop search
         if intent_info.get("intent") == "monster_drops":
             aggregated_hits = self._try_aggregated_drop_search(canonical_query)
             if aggregated_hits:
                 return aggregated_hits
 
-        # 2. Standard Path: Vector Search + Soft Rerank
         return self._vector_search_and_rerank(canonical_query, intent_info, top_k=top_k)
-
-
-# =====================================================================
-# TESTING ENTRY POINT
-# =====================================================================
-if __name__ == "__main__":
-    retriever = LocalRAGRetriever()
-
-    test_queries = [
-        "what monsters drop dragon boots",
-        "what drops draconic visage",
-        "How much damage does a dragon dagger special attack do?",
-        "What stats are needed to wield an abyssal whip?",
-        "How do i kill bandos?",
-    ]
-
-    # for q in test_queries:
-    #     print(f"\n==========================================")
-    #     print(f"SEARCH QUERY: '{q}'")
-    #     print(f"==========================================")
-    #     hits = retriever.search(q, top_k=5)
-
-    #     for i, hit in enumerate(hits, 1):
-    #         print(f"[{i}] Category: {hit['metadata'].get('category')}")
-    #         print(f"Title: {hit['metadata'].get('title')}")
-    #         print(f"Content Preview:\n{hit['metadata'].get('text', '')[:250]}\n")
-
-    retriever = LocalRAGRetriever()
-    query = "How do i kill bandos?"
-
-    hits = retriever.search(query, top_k=3)
-    full_prompt = build_rag_prompt(query, hits)
-
-    print(f"\n=== GENERATED PROMPT PREVIEW === ({len(full_prompt)})")
-    # print(full_prompt[:1500])
-    print(full_prompt)

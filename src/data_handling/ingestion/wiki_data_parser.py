@@ -10,32 +10,42 @@ OUTPUT_DIR = DATA_DIR / "processed"
 OUTPUT_FILE = OUTPUT_DIR / "clean_wiki_articles.jsonl"
 
 
-def preprocess_osrs_templates(parsed_code):
-    """Processes OSRS MediaWiki templates in the AST before stripping code.
+TEMPLATE_MAP = {
+    # Rune requirement templates -> outputs "Runes required: 1 Nature rune, 5 Fire runes"
+    "runereq": "Runes required",
+    "rune req": "Runes required",
+    "rune_req": "Runes required",
+    "runerequirement": "Runes required",
+    "rune": "Rune",
+    "r": "Rune",
+    "runecost": "Rune cost",
+    # Skill / Level templates
+    "skill": "Skill level required",
+    "scp": "Skill",
+    "req": "Requirement",
+    "requirement": "Requirement",
+    "level": "Level",
+    "levels": "Level",
+    # Item / Icon templates
+    "item": "Item",
+    "ico": "Item",
+    "icon": "Item",
+    "s": "Item",
+    "i": "Item",
+    "use": "Item",
+}
 
-    Preserves skill levels, item names in equipment slots, and slot rankings (1-5).
-    """
-    # 1. First Pass: Process leaf-level icon/item templates first so nested items expand
-    # Handles: {{Item|Torva full helm}} -> "Torva full helm"
-    # Handles: {{Skill|Attack|80+}} -> "Attack 80+"
+
+def preprocess_osrs_templates(parsed_code):
+    """Processes OSRS MediaWiki templates using a dictionary map to format clean text."""
+    # 1. First Pass: Leaf-level icon, skill, and rune templates
     for template in parsed_code.filter_templates():
         name = template.name.strip().lower()
 
-        if name in [
-            "skill",
-            "scp",
-            "item",
-            "ico",
-            "icon",
-            "s",
-            "i",
-            "use",
-            "req",
-            "requirement",
-            "level",
-            "levels",
-        ]:
+        if name in TEMPLATE_MAP:
+            label_prefix = TEMPLATE_MAP[name]
             extracted_parts = []
+
             for param in template.params:
                 val = str(param.value).strip()
                 key = str(param.name).strip()
@@ -43,30 +53,46 @@ def preprocess_osrs_templates(parsed_code):
                 if not val:
                     continue
 
+                # Handle Named Parameters (Key-Value like Nature=1 or Attack=80)
                 if not key.isdigit():
-                    extracted_parts.append(f"{key}: {val}")
+                    # If it's a rune template, add the word "rune" for vector clarity
+                    if "rune" in name or "rune" in label_prefix.lower():
+                        item_name = key.capitalize()
+                        if "rune" not in item_name.lower():
+                            item_name = f"{item_name} rune"
+
+                        if val.isdigit():
+                            amount = int(val)
+                            part = f"{amount} {item_name}s" if amount > 1 else f"{amount} {item_name}"
+                        else:
+                            part = f"{val} {item_name}"
+                        extracted_parts.append(part)
+                    else:
+                        extracted_parts.append(f"{key.capitalize()}: {val}")
+
+                # Handle Positional Parameters (e.g. {{Skill|Attack|80+}} or {{Rune|Nature|1}})
                 else:
                     extracted_parts.append(val)
 
+            # Combine parts with the dictionary label
             if extracted_parts:
-                parsed_code.replace(template, f" {' '.join(extracted_parts)} ")
+                formatted_text = f" {label_prefix}: {', '.join(extracted_parts)} "
+                parsed_code.replace(template, formatted_text)
 
         elif name in ["cbl", "combat"]:
             if template.has(1):
                 val = str(template.get(1).value).strip()
                 parsed_code.replace(template, f" Combat level {val} ")
 
-    # 2. Second Pass: Process Equipment Setups / Gear Tables with ranked slots
+    # 2. Second Pass: Equipment Setups & Gear Tables (Unchanged)
     for template in parsed_code.filter_templates():
         name = template.name.strip().lower()
 
         if any(k in name for k in ["equipment", "gear", "setup", "lineup", "loadout"]):
             gear_items = []
             for param in template.params:
-                # Recursively parse the parameter value to convert internal templates or wiki links
                 val_ast = mwparserfromhell.parse(str(param.value))
 
-                # Expand any remaining sub-templates inside the slot
                 for sub_t in val_ast.filter_templates():
                     sub_parts = [str(p.value).strip() for p in sub_t.params if str(p.value).strip()]
                     if sub_parts:
@@ -78,18 +104,12 @@ def preprocess_osrs_templates(parsed_code):
                 if not val or key in ["caption", "image", "notes", "style"]:
                     continue
 
-                # Parse ranked slot keys (e.g., head1 -> Head (BiS), head2 -> Head (Alt 1))
-                # Match keys ending in numbers 1-5
                 slot_match = re.match(r"^([a-z]+)(\d)$", key)
                 if slot_match:
                     slot_name = slot_match.group(1).capitalize()
                     rank_num = int(slot_match.group(2))
 
-                    if rank_num == 1:
-                        rank_label = "BiS"
-                    else:
-                        rank_label = f"Alt {rank_num - 1}"
-
+                    rank_label = "BiS" if rank_num == 1 else f"Alt {rank_num - 1}"
                     gear_items.append(f"{slot_name} ({rank_label}): {val}")
                 elif not key.isdigit():
                     gear_items.append(f"{key.capitalize()}: {val}")

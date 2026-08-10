@@ -1,33 +1,30 @@
 #!/bin/bash
 set -e
 
-# Path to the primary deliverable file
 INDEX_FILE="data/processed/vector_index.faiss"
 
 echo "=================================================="
 echo "Starting OSRS RAG Application Container..."
 echo "=================================================="
 
-# Check if the FAISS index exists in the processed directory
-if [ ! -f "$INDEX_FILE" ]; then
-    echo "FAISS Index not found at $INDEX_FILE."
+# Force run if the index file is missing OR if no metadata json files exist
+METADATA_COUNT=$(find data/processed -name "*_metadata.json" 2>/dev/null | wc -l)
+
+if [ ! -f "$INDEX_FILE" ] || [ "$METADATA_COUNT" -eq 0 ]; then
+    echo "FAISS Index or metadata missing (Found $METADATA_COUNT metadata files)."
     echo "Running full data ingestion and embedding pipeline..."
     echo "=================================================="
 
-    # Step 1: Fetch raw data (Wiki API, GE Prices) Ge data is fetched and parsed in ge_data_fetcher.py
+    # Step 1: Fetch raw data
     echo "[1/4] Fetching and parsing raw data..."
     if [ -f "src/data_handling/ingestion/wiki_data_fetcher.py" ]; then
         python src/data_handling/ingestion/wiki_data_fetcher.py
-    else
-        echo "No separate wiki data fetcher script found.."
     fi
-    if [ -f "src/data_handling/ingestiong/ge_data_fetcher.py" ]; then
+    if [ -f "src/data_handling/ingestion/ge_data_fetcher.py" ]; then
         python src/data_handling/ingestion/ge_data_fetcher.py
-    else
-        echo "No separate GE data fetcher script found.."
     fi
 
-    # Step 2: Parse raw dumps into structured JSONL (osrsreboxed fetches and parses in reboxed_data_parser.py)
+    # Step 2: Parse raw dumps
     python src/data_handling/ingestion/wiki_data_parser.py
     python src/data_handling/reboxed_data_parser.py
     
@@ -43,10 +40,9 @@ if [ ! -f "$INDEX_FILE" ]; then
     echo "Data pipeline execution complete!"
     echo "=================================================="
 else
-    echo "Found existing vector index at $INDEX_FILE."
+    echo "Found valid existing vector index and metadata."
     echo "Skipping data pipeline step."
 fi
 
 echo "Starting application process..."
-# Execute whatever command was passed via Dockerfile CMD or Compose
 exec "$@"

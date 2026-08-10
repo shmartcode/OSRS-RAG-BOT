@@ -265,7 +265,7 @@ class LocalRAGRetriever:
     def __init__(
         self,
         processed_dir="data/processed",
-        model_name="fine_tuned_osrs_embedder_v2",
+        model_name="shmartcode/osrs-embedder-v2",
         reranker_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
     ):
         self.processed_dir = processed_dir

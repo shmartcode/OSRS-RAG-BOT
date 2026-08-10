@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Pre-download and cache the Hugging Face model during the image build
+RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('shmartcode/osrs-embedder-v2')"
+
 # Grant execution permissions to entrypoint.sh
 RUN chmod +x entrypoint.sh
 

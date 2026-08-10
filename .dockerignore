@@ -1,6 +1,7 @@
 
 # Heavy Raw Data & Training Datasets (Exclude)
 data/raw/
+data/processed/
 **/*pairs*.json
 **/*raw*
 

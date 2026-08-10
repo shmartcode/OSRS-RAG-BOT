@@ -14,6 +14,7 @@ git clone [https://github.com/shmartcode/OSRS-RAG-BOT.git](https://github.com/sh
 * run.py will build the docker container downloading all necessary packages including Llama 3.1
 * first time executing "run.py" can take 10+ minutes depending on download speeds to download and install necessary packages as well as download and parse the required data.
 * due to the intially long run times ive left progress bard and other would be debug information active to show progression
+* the project is set to run on your gpu if available for faster computations
 
 
 ## Key Features

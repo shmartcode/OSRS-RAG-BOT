@@ -205,7 +205,7 @@ def process_embedding():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using compute device: {device}", flush=True)
 
-    model_name = "fine_tuned_osrs_embedder_v2"
+    model_name = "shmartcode/fine_tuned_osrs_embedder_v2"
     model = SentenceTransformer(model_name, device=device)
     print(f"Loading embedding model: {model_name}...")
 

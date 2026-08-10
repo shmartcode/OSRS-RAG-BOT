@@ -23,6 +23,9 @@ services:
     container_name: osrs_rag_app
     stdin_open: true
     tty: true
+    volumes:
+      # Persists generated embeddings/indices so restarts don't re-run the pipeline
+      - processed_data:/app/data/processed
     environment:
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ollama:11434/v1}
       - LOCAL_MODEL_NAME=${LOCAL_MODEL_NAME:-llama3.1:8b}
@@ -33,3 +36,4 @@ services:
 
 volumes:
   ollama_data:
+  processed_data:

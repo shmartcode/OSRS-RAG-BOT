@@ -304,6 +304,7 @@ class LocalRAGRetriever:
         print("Loading metadata records...")
         # Step 2: Load metadata sequentially from metadata.jsonl
         self.metadata_records = self._load_metadata()
+        self.drop_table_index = self._build_drop_index()
 
         # Sanity check vector count against metadata records
         if self.index.ntotal != len(self.metadata_records):
@@ -333,6 +334,56 @@ class LocalRAGRetriever:
                     print(f"Warning: Skipping malformed JSON line {line_num}: {e}")
 
         return records
+
+
+def _build_drop_index(self):
+    """Builds an inverted index mapping lowercased item names to monster drop records."""
+    # Structure: { item_name: { monster_name_lower: { monster, item_name, rarity, one_in_x, percentage } } }
+    self.drop_index = {}
+
+    for record in self.metadata_records:
+        if record.get("category") != "Monster":
+            continue
+
+        raw_monster_name = record.get("title") or record.get("name", "Unknown")
+        base_monster_name = raw_monster_name.strip()
+        monster_key = base_monster_name.lower()
+
+        drops = record.get("drops", [])
+        if not isinstance(drops, list):
+            continue
+
+        for drop in drops:
+            if isinstance(drop, dict):
+                item_name = str(drop.get("item") or drop.get("name") or "").strip().lower()
+                rarity_val = parse_rarity_value(drop.get("rarity", 0))
+            elif isinstance(drop, str):
+                item_name = drop.strip().lower()
+                rarity_val = 0.0
+            else:
+                continue
+
+            if not item_name:
+                continue
+
+            one_in_x = round(1.0 / rarity_val) if rarity_val > 0 else 0
+            pct = rarity_val * 100
+
+            entry = {
+                "monster": base_monster_name,
+                "item_name": item_name.title(),
+                "rarity": rarity_val,
+                "one_in_x": one_in_x,
+                "percentage": pct,
+            }
+
+            if item_name not in self.drop_index:
+                self.drop_index[item_name] = {}
+
+            # Retain the highest drop rate if a monster lists the item multiple times
+            existing = self.drop_index[item_name].get(monster_key)
+            if not existing or rarity_val > existing["rarity"]:
+                self.drop_index[item_name][monster_key] = entry
 
     def _extract_target_item_name(self, query: str) -> str:
         """Extracts target item keyword from natural language queries."""
@@ -375,57 +426,34 @@ class LocalRAGRetriever:
         return clean_q.strip()
 
     def _try_aggregated_drop_search(self, query_text: str, top_k_monsters: int = 10) -> list[dict]:
-        """Scans metadata directly to aggregate all monsters dropping the requested item."""
+        """Aggregates and ranks all monsters dropping the requested target item."""
         target_item = self._extract_target_item_name(query_text)
         if not target_item or len(target_item) < 3:
             return []
 
+        target_item_clean = target_item.strip().lower()
         matching_monsters = []
-        seen_monsters = set()
 
-        for record in self.metadata_records:
-            if record.get("category") != "Monster":
-                continue
+        # 1. Direct exact lookup (Fastest & most accurate)
+        if hasattr(self, "drop_index") and target_item_clean in self.drop_index:
+            matching_monsters = list(self.drop_index[target_item_clean].values())
 
-            raw_monster_name = record.get("title") or record.get("name", "Unknown")
-            base_monster_name = raw_monster_name.strip()
-
-            if base_monster_name.lower() in seen_monsters:
-                continue
-
-            drops = record.get("drops", [])
-            if not isinstance(drops, list):
-                continue
-
-            for drop in drops:
-                item_name = ""
-                rarity_val = 0.0
-
-                if isinstance(drop, dict):
-                    item_name = str(drop.get("item", "") or drop.get("name", "")).lower()
-                    rarity_val = parse_rarity_value(drop.get("rarity", 0))
-                elif isinstance(drop, str):
-                    item_name = drop.lower()
-
-                if target_item in item_name or item_name in target_item:
-                    one_in_x = round(1.0 / rarity_val) if rarity_val > 0 else 0
-                    pct = rarity_val * 100
-
-                    matching_monsters.append(
-                        {
-                            "monster": base_monster_name,
-                            "item_name": item_name.title(),
-                            "rarity": rarity_val,
-                            "one_in_x": one_in_x,
-                            "percentage": pct,
-                        }
-                    )
-                    seen_monsters.add(base_monster_name.lower())
-                    break
+        # 2. Substring fallback: search index keys where target_item is inside index_key
+        # (e.g., target "bones" matches "big bones", but NOT vice-versa)
+        else:
+            seen_monsters_map = {}
+            for item_key, monsters_map in getattr(self, "drop_index", {}).items():
+                if target_item_clean in item_key:
+                    for monster_key, entry in monsters_map.items():
+                        existing = seen_monsters_map.get(monster_key)
+                        if not existing or entry["rarity"] > existing["rarity"]:
+                            seen_monsters_map[monster_key] = entry
+            matching_monsters = list(seen_monsters_map.values())
 
         if not matching_monsters:
             return []
 
+        # Sort monsters by highest drop rate
         matching_monsters.sort(key=lambda x: x["rarity"], reverse=True)
         top_matches = matching_monsters[:top_k_monsters]
 

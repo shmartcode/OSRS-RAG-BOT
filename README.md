@@ -1,6 +1,8 @@
-# OSRS RAG Bot
-
+# OSRS RAG Bot Intro Summary
 An intelligent, offline Retrieval-Augmented Generation (RAG) assistant for Old School RuneScape (OSRS). Built with custom PyTorch Lightning embedding models, FAISS vector search, and a local Llama 3.1 8B LLM running on Ollama inside Docker.
+
+# Intro details
+This project was a learning experience in Machine Learning. My goals were to learn how to train my own model, how to utilize docker, how to pull and parse large quantity of data using an API, and how to make a model that can run offline once intialized.
 
 ## Quickstart
 ### 1. Clone the Repository

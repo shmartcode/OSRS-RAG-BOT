@@ -24,11 +24,14 @@ services:
     stdin_open: true
     tty: true
     volumes:
-      # Persists generated embeddings/indices so restarts don't re-run the pipeline
+      # Persists downloaded FAISS index, JSON/JSONL, and .npy dataset files
       - processed_data:/app/data/processed
+      # Persists downloaded SentenceTransformer and CrossEncoder model weights
+      - hf_cache:/app/data/hf_cache
     environment:
       - LOCAL_LLM_URL=${LOCAL_LLM_URL:-http://ollama:11434/v1}
       - LOCAL_MODEL_NAME=${LOCAL_MODEL_NAME:-llama3.1:8b}
+      - HF_HOME=/app/data/hf_cache
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -37,3 +40,4 @@ services:
 volumes:
   ollama_data:
   processed_data:
+  hf_cache:

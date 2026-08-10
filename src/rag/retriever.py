@@ -9,6 +9,10 @@ from src.rag.aliases import resolve_query_aliases
 from src.rag.context_formatter import build_rag_prompt
 from src.rag.drop_rate_formatter import enrich_retrieved_hit_with_drop_math
 
+from huggingface_hub import hf_hub_download, snapshot_download
+
+os.environ["HF_HOME"] = os.path.abspath("data/hf_cache")
+
 # =====================================================================
 # GLOBAL STATELESS HELPERS
 # =====================================================================
@@ -259,6 +263,8 @@ def parse_rarity_value(rarity) -> float:
 # STATEFUL RETRIEVER CLASS
 # =====================================================================
 
+DATASET_REPO = "shmartcode/osrs-vector-index"
+
 
 class LocalRAGRetriever:
 
@@ -267,9 +273,22 @@ class LocalRAGRetriever:
         processed_dir="data/processed",
         model_name="shmartcode/osrs-embedder-v2",
         reranker_name="cross-encoder/ms-marco-MiniLM-L-6-v2",
+        repo_id=DATASET_REPO,
     ):
         self.processed_dir = processed_dir
+        self.repo_id = repo_id
         self.index_path = os.path.join(processed_dir, "vector_index.faiss")
+        os.makedirs(self.processed_dir, exist_ok=True)
+
+        print("Ensuring repository files are downloaded from Hugging Face...")
+        # Step 1: Download all dataset files first (.faiss, .json, .jsonl, .npy)
+        snapshot_download(
+            repo_id=self.repo_id,
+            repo_type="dataset",
+            local_dir=self.processed_dir,
+            allow_patterns=["*.json", "*.jsonl", "*.npy", "*.faiss"],
+            local_dir_use_symlinks=False,  # Prevents broken symlinks inside Docker volumes
+        )
 
         print("Loading embedding model...")
         self.model = SentenceTransformer(model_name)
@@ -283,21 +302,42 @@ class LocalRAGRetriever:
         self.index = faiss.read_index(self.index_path)
 
         print("Loading metadata records...")
+        # Step 2: Load metadata after downloading
         self.metadata_records = self._load_metadata()
         print(f"Retriever initialized with {len(self.metadata_records)} metadata entries.")
 
     def _load_metadata(self):
         records = []
-        meta_files = sorted([f for f in os.listdir(self.processed_dir) if f.endswith("_metadata.json")])
-        for file_name in meta_files:
+        # Find all JSON and JSONL metadata/data files
+        all_files = sorted(os.listdir(self.processed_dir))
+
+        for file_name in all_files:
             file_path = os.path.join(self.processed_dir, file_name)
-            with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, list):
-                    records.extend(data)
-                else:
-                    records.append(data)
+
+            # Process .json and .metadata.json files
+            if file_name.endswith(".json"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    if isinstance(data, list):
+                        records.extend(data)
+                    else:
+                        records.append(data)
+
+            # Process .jsonl files line-by-line
+            elif file_name.endswith(".jsonl"):
+                with open(file_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            records.append(json.loads(line))
+
         return records
+
+    def load_numpy_embeddings(self, filename):
+        """Helper to load pre-computed embedding vectors if using .npy files directly."""
+        npy_path = os.path.join(self.processed_dir, filename)
+        if os.path.exists(npy_path):
+            return np.load(npy_path)
+        raise FileNotFoundError(f"Numpy file {filename} not found in {self.processed_dir}")
 
     def _extract_target_item_name(self, query: str) -> str:
         """Extracts target item keyword from natural language queries."""

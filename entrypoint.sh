@@ -1,27 +1,35 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
-DATA_DIR="data/processed"
-INDEX_FILE="${DATA_DIR}/vector_index.faiss"
+PROCESSED_DIR="${PROCESSED_DIR:-data/processed}"
+FAISS_INDEX="${PROCESSED_DIR}/vector_index.faiss"
+METADATA_FILE="${PROCESSED_DIR}/metadata.jsonl"
 
-echo "=================================================="
-echo "Starting OSRS RAG Application Container..."
-echo "=================================================="
+echo "=========================================="
+echo "Starting OSRS RAG Application Service"
+echo "=========================================="
 
-# Ensure the local data target directory exists
-mkdir -p "$DATA_DIR"
+# 1. Ensure processed directory exists
+mkdir -p "$PROCESSED_DIR"
 
-# Count any dataset/metadata/array files in data/processed
-DATA_FILE_COUNT=$(find "$DATA_DIR" -type f \( -name "*.json" -o -name "*.jsonl" -o -name "*.npy" -o -name "*.faiss" \) 2>/dev/null | wc -l)
-
-if [ ! -f "$INDEX_FILE" ] || [ "$DATA_FILE_COUNT" -eq 0 ]; then
-    echo "Vector index or dataset files not found locally (Found $DATA_FILE_COUNT dataset files)."
-    echo "Hugging Face dataset download will automatically trigger on startup in retriever.py."
-    echo "=================================================="
+# 2. Check for core runtime vector search artifacts
+if [ ! -f "$FAISS_INDEX" ] || [ ! -f "$METADATA_FILE" ]; then
+    echo "[INFO] Vector artifacts missing from local storage (${FAISS_INDEX} / ${METADATA_FILE})."
+    echo "[INFO] Retriever will download runtime assets from Hugging Face Hub on initialization."
 else
-    echo "Found valid existing vector index and dataset files in $DATA_DIR."
-    echo "Skipping redundant downloads."
+    echo "[OK] Found local FAISS index: ${FAISS_INDEX}"
+    echo "[OK] Found local metadata: ${METADATA_FILE}"
 fi
 
+# 3. Optional: Clean up legacy .npy or separate .json metadata files if present
+echo "[INFO] Cleaning up legacy embedding files if present..."
+rm -f "${PROCESSED_DIR}"/*_embeddings.npy
+rm -f "${PROCESSED_DIR}"/*_metadata.json
+
+# 4. Start the application (Uvicorn / FastAPI server)
 echo "Starting application process..."
-exec "$@"
+if [ "$#" -gt 0 ]; then
+    exec "$@"
+else
+    exec uvicorn src.api:app --host 0.0.0.0 --port 8000
+fi

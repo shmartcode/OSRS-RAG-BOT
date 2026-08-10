@@ -281,12 +281,12 @@ class LocalRAGRetriever:
         os.makedirs(self.processed_dir, exist_ok=True)
 
         print("Ensuring repository files are downloaded from Hugging Face...")
-        # Step 1: Download all dataset files first (.faiss, .json, .jsonl, .npy)
+        # Step 1: Download only required runtime dataset assets (vector_index.faiss and metadata.jsonl)
         snapshot_download(
             repo_id=self.repo_id,
             repo_type="dataset",
             local_dir=self.processed_dir,
-            allow_patterns=["*.json", "*.jsonl", "*.npy", "*.faiss"],
+            allow_patterns=["vector_index.faiss", "metadata.jsonl"],
             local_dir_use_symlinks=False,  # Prevents broken symlinks inside Docker volumes
         )
 
@@ -302,42 +302,37 @@ class LocalRAGRetriever:
         self.index = faiss.read_index(self.index_path)
 
         print("Loading metadata records...")
-        # Step 2: Load metadata after downloading
+        # Step 2: Load metadata sequentially from metadata.jsonl
         self.metadata_records = self._load_metadata()
+
+        # Sanity check vector count against metadata records
+        if self.index.ntotal != len(self.metadata_records):
+            raise ValueError(
+                f"Index/Metadata Desync! FAISS contains {self.index.ntotal} vectors, " f"but metadata.jsonl has {len(self.metadata_records)} entries."
+            )
+
         print(f"Retriever initialized with {len(self.metadata_records)} metadata entries.")
 
-    def _load_metadata(self):
+    def _load_metadata(self) -> list[dict]:
+        """Loads records sequentially from metadata.jsonl where line i maps to FAISS vector ID i."""
+        metadata_path = os.path.join(self.processed_dir, "metadata.jsonl")
         records = []
-        # Find all JSON and JSONL metadata/data files
-        all_files = sorted(os.listdir(self.processed_dir))
 
-        for file_name in all_files:
-            file_path = os.path.join(self.processed_dir, file_name)
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"Metadata file not found at {metadata_path}")
 
-            # Process .json and .metadata.json files
-            if file_name.endswith(".json"):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        records.extend(data)
-                    else:
-                        records.append(data)
-
-            # Process .jsonl files line-by-line
-            elif file_name.endswith(".jsonl"):
-                with open(file_path, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            records.append(json.loads(line))
+        print(f"Loading metadata records from {metadata_path}...")
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Skipping malformed JSON line {line_num}: {e}")
 
         return records
-
-    def load_numpy_embeddings(self, filename):
-        """Helper to load pre-computed embedding vectors if using .npy files directly."""
-        npy_path = os.path.join(self.processed_dir, filename)
-        if os.path.exists(npy_path):
-            return np.load(npy_path)
-        raise FileNotFoundError(f"Numpy file {filename} not found in {self.processed_dir}")
 
     def _extract_target_item_name(self, query: str) -> str:
         """Extracts target item keyword from natural language queries."""

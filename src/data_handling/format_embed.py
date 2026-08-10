@@ -2,6 +2,7 @@ import json
 import os
 import numpy as np
 import torch
+import faiss
 from sentence_transformers import SentenceTransformer
 
 
@@ -217,14 +218,16 @@ def process_embedding():
         "data/processed/ge_prices_corpus.jsonl",
     ]
 
+    all_documents = []
+    all_metadata = []
+
+    # 1. Process all input files sequentially into global arrays
     for file_name in corpus_files:
         if not os.path.exists(file_name):
             print(f"Skipping {file_name} (File not found)")
             continue
 
-        print(f"\nProcessing corpus: {file_name}")
-        documents = []
-        metadata = []
+        print(f"Processing corpus: {file_name}")
 
         with open(file_name, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
@@ -235,7 +238,7 @@ def process_embedding():
                 try:
                     record = json.loads(line)
 
-                    # 1. Format text based on domain category
+                    # Determine text based on domain category
                     if "monsters" in file_name:
                         category = "Monster"
                         text = build_monster_text(record)
@@ -253,10 +256,7 @@ def process_embedding():
                         text = record.get("text", record.get("content", ""))
 
                     if text:
-                        documents.append(text)
                         title = record.get("title", record.get("name", "Unknown"))
-
-                        # 2. Preserve raw structured fields in metadata entry for Python logic
                         meta_entry = {
                             "source": file_name,
                             "id": record.get("id"),
@@ -265,13 +265,11 @@ def process_embedding():
                             "text": text,
                         }
 
-                        # Preserve entity-specific fields for programmatic access
                         if "items" in file_name:
                             meta_entry["equipment_stats"] = record.get("equipment_stats", {})
                             meta_entry["weapon_stats"] = record.get("weapon_stats", {})
                             meta_entry["requirement_stats"] = record.get("requirement_stats", {})
                             meta_entry["highalch"] = record.get("highalch", 0)
-
                         elif "monsters" in file_name:
                             if "drops" in record:
                                 meta_entry["drops"] = record["drops"]
@@ -279,36 +277,46 @@ def process_embedding():
                                 meta_entry["slayer_level"] = record["slayer_level"]
                             meta_entry["combat_level"] = record.get("combat_level")
                             meta_entry["hitpoints"] = record.get("hitpoints")
-
                         elif "prayers" in file_name:
                             meta_entry["drain_per_minute"] = record.get("drain_per_minute", 0)
                             meta_entry["requirements"] = record.get("requirements", {})
 
-                        metadata.append(meta_entry)
+                        all_documents.append(text)
+                        all_metadata.append(meta_entry)
 
                 except json.JSONDecodeError as e:
                     print(f"Skipping malformed JSON line {line_num} in {file_name}: {e}")
 
-        if documents:
-            print(f"Generating embeddings for {len(documents)} records in {file_name}...")
-            embeddings = model.encode(
-                documents,
-                batch_size=32,
-                show_progress_bar=True,
-                convert_to_numpy=True,
-                normalize_embeddings=True,
-            )
-            print(f"Finished {file_name}. Embedding shape: {embeddings.shape}")
+    if not all_documents:
+        print("No documents were loaded. Exiting.")
+        return
 
-            base_name = file_name.replace(".jsonl", "")
-            emb_path = f"{base_name}_embeddings.npy"
-            meta_path = f"{base_name}_metadata.json"
+    # 2. Encode all documents in one continuous pass
+    print(f"\nGenerating embeddings for total {len(all_documents)} records...")
+    embeddings = model.encode(
+        all_documents,
+        batch_size=32,
+        show_progress_bar=True,
+        convert_to_numpy=True,
+        normalize_embeddings=True,
+    )
 
-            np.save(emb_path, embeddings)
-            with open(meta_path, "w", encoding="utf-8") as mf:
-                json.dump(metadata, mf, ensure_ascii=False, indent=2)
+    # 3. Save single canonical metadata.jsonl file
+    output_meta_path = "data/processed/metadata.jsonl"
+    with open(output_meta_path, "w", encoding="utf-8") as mf:
+        for entry in all_metadata:
+            mf.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    print(f"Saved {len(all_metadata)} metadata entries to {output_meta_path}")
 
-            print(f"Saved embeddings to {emb_path} and metadata to {meta_path}.")
+    # 4. Build and save single FAISS index
+    print("Building FAISS index...")
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatIP(dimension)  # Use IndexFlatIP for normalized vectors (cosine similarity)
+    index.add(embeddings.astype("float32"))
+
+    output_faiss_path = "data/processed/vector_index.faiss"
+    faiss.write_index(index, output_faiss_path)
+    print(f"Saved FAISS index with {index.ntotal} vectors to {output_faiss_path}")
 
 
 if __name__ == "__main__":

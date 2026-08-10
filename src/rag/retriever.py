@@ -335,55 +335,54 @@ class LocalRAGRetriever:
 
         return records
 
+    def _build_drop_index(self):
+        """Builds an inverted index mapping lowercased item names to monster drop records."""
+        # Structure: { item_name: { monster_name_lower: { monster, item_name, rarity, one_in_x, percentage } } }
+        self.drop_index = {}
 
-def _build_drop_index(self):
-    """Builds an inverted index mapping lowercased item names to monster drop records."""
-    # Structure: { item_name: { monster_name_lower: { monster, item_name, rarity, one_in_x, percentage } } }
-    self.drop_index = {}
-
-    for record in self.metadata_records:
-        if record.get("category") != "Monster":
-            continue
-
-        raw_monster_name = record.get("title") or record.get("name", "Unknown")
-        base_monster_name = raw_monster_name.strip()
-        monster_key = base_monster_name.lower()
-
-        drops = record.get("drops", [])
-        if not isinstance(drops, list):
-            continue
-
-        for drop in drops:
-            if isinstance(drop, dict):
-                item_name = str(drop.get("item") or drop.get("name") or "").strip().lower()
-                rarity_val = parse_rarity_value(drop.get("rarity", 0))
-            elif isinstance(drop, str):
-                item_name = drop.strip().lower()
-                rarity_val = 0.0
-            else:
+        for record in self.metadata_records:
+            if record.get("category") != "Monster":
                 continue
 
-            if not item_name:
+            raw_monster_name = record.get("title") or record.get("name", "Unknown")
+            base_monster_name = raw_monster_name.strip()
+            monster_key = base_monster_name.lower()
+
+            drops = record.get("drops", [])
+            if not isinstance(drops, list):
                 continue
 
-            one_in_x = round(1.0 / rarity_val) if rarity_val > 0 else 0
-            pct = rarity_val * 100
+            for drop in drops:
+                if isinstance(drop, dict):
+                    item_name = str(drop.get("item") or drop.get("name") or "").strip().lower()
+                    rarity_val = parse_rarity_value(drop.get("rarity", 0))
+                elif isinstance(drop, str):
+                    item_name = drop.strip().lower()
+                    rarity_val = 0.0
+                else:
+                    continue
 
-            entry = {
-                "monster": base_monster_name,
-                "item_name": item_name.title(),
-                "rarity": rarity_val,
-                "one_in_x": one_in_x,
-                "percentage": pct,
-            }
+                if not item_name:
+                    continue
 
-            if item_name not in self.drop_index:
-                self.drop_index[item_name] = {}
+                one_in_x = round(1.0 / rarity_val) if rarity_val > 0 else 0
+                pct = rarity_val * 100
 
-            # Retain the highest drop rate if a monster lists the item multiple times
-            existing = self.drop_index[item_name].get(monster_key)
-            if not existing or rarity_val > existing["rarity"]:
-                self.drop_index[item_name][monster_key] = entry
+                entry = {
+                    "monster": base_monster_name,
+                    "item_name": item_name.title(),
+                    "rarity": rarity_val,
+                    "one_in_x": one_in_x,
+                    "percentage": pct,
+                }
+
+                if item_name not in self.drop_index:
+                    self.drop_index[item_name] = {}
+
+                # Retain the highest drop rate if a monster lists the item multiple times
+                existing = self.drop_index[item_name].get(monster_key)
+                if not existing or rarity_val > existing["rarity"]:
+                    self.drop_index[item_name][monster_key] = entry
 
     def _extract_target_item_name(self, query: str) -> str:
         """Extracts target item keyword from natural language queries."""

@@ -24,9 +24,15 @@ RUN python -c "from sentence_transformers import CrossEncoder, SentenceTransform
     SentenceTransformer('shmartcode/osrs-embedder-v2'); \
     CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
-# Grant execution permissions to entrypoint.sh
-RUN chmod +x entrypoint.sh
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
 
-# Set the entrypoint script and default start command
-ENTRYPOINT ["./entrypoint.sh"]
+# Fix Windows line endings (converts \r\n to \n) and make it executable
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
+
+# Set it as the entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
 CMD ["python", "app.py"]
+
+

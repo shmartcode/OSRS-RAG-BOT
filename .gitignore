@@ -24,4 +24,4 @@ runs/
 fine_tuned_osrs_embedder/
 fine_tuned_osrs_embedder_epoch*/
 fine_tuned_osrs_embedder_v2
-model_hf_upload
+model_hf_upload.py

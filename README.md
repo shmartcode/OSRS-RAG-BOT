@@ -1,4 +1,5 @@
-# OSRS RAG Bot Intro Summary
+
+# OSRS RAG Bot Intro Summary | LOCAL SEMANTIC SEARCH ENGINE
 An intelligent, offline Retrieval-Augmented Generation (RAG) assistant for Old School RuneScape (OSRS). Built with custom PyTorch Lightning embedding models, FAISS vector search, and a local Llama 3.1 8B LLM running on Ollama inside Docker.
 
 # Intro details
